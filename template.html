@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI GAME - Templates</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/template.css">
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header dengan AI GAME di tengah -->
+    <header class="main-header">
+        <h1 class="header-title">Template Games</h1>
+    </header>
+
+    <!-- Navigation di bawah header -->
+    <nav class="main-nav">
+        <div class="nav-container">
+            <div class="nav-links">
+                <a href="index.html" class="nav-link">Home</a>
+                <a href="prompting.html" class="nav-link">Prompting</a>
+                <a href="about.html" class="nav-link">About</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="template-container">
+        <div class="filter-section">
+            <div class="search-box">
+                <input type="text" class="search-input" placeholder="Search templates...">
+            </div>
+            <div class="filter-options">
+                <select class="genre-filter">
+                    <option value="all">All Genres</option>
+                    <option value="racing">Racing</option>
+                    <option value="puzzle">Puzzle</option>
+                </select>
+                <select class="dimension-filter">
+                    <option value="all">All Dimensions</option>
+                    <option value="2d">2D</option>
+                    <option value="3d">3D</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="templates-grid">
+            <!-- Template cards akan di-load oleh JavaScript nanti -->
+            <div class="empty-state">
+                <h3>Template Gallery</h3>
+                <p>Template game akan ditampilkan di sini</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/main.js"></script>
+    <script src="js/template.js"></script>
+</body>
+</html>

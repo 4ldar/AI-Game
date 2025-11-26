@@ -1,0 +1,13 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Instrument Sans', sans-serif;
+}
+
+body {
+    background: linear-gradient(135deg, #0C2B4E 0%, #1A3D64 100%);
+    color: white;
+    min-height: 100vh;
+    line-height: 1.6;
+}
