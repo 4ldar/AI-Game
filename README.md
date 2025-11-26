@@ -2,7 +2,7 @@
 
 AI Game Builder adalah web app yang membantu siapa saja membuat game dengan cepat dan mudah. Aplikasi ini menyediakan template mekanik dasar seperti race, shooter, dan parkour yang dapat diubah secara otomatis ke bahasa pemrograman atau engine apa pun melalui AI.
 
-Pengguna cukup memilih template game, menulis prompt, dan AI akan menghasilkan kode game lengkap sesuai permintaan — misalnya Three.js, Python Pygame, Unity C#, Godot GDScript, HTML Canvas, dan banyak lainnya.
+Pengguna cukup memilih template game, menulis prompt, dan AI akan menghasilkan kode game lengkap sesuai permintaan — misalnya Three.js, Python Pygame, HTML Canvas, dan banyak lainnya.
 
 ## 🚀 Fitur Utama
 
