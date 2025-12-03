@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI GAME - Templates</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/template.css">
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+</head>
+<body>
+    <div class="game-selector">
+        <label for="game-selector" class="visually-hidden">Select a Game</label>
+        <select id="game-selector" title="Select a Game">
+            <option value="">Select a Game</option>
+            <option value="basic.js">Basic Box 1</option>
+            <option value="basic2.js">Basic Box 2</option>
+            <option value="asteroids2D.js">Asteroids 2D</option>
+            <option value="breakout2D.js">Breakout 2D</option>
+            <option value="collector2D.js">Collector 2D</option>
+            <option value="endlessRunner3D.js">Endless Runner 3D</option>
+            <option value="maze2D.js">Maze 2D</option>
+            <option value="maze3D.js">Maze 3D</option>
+            <option value="parkour3D-firstperson.js">Parkour 3D (First Person)</option>
+            <option value="parkour3D-thirdperson.js">Parkour 3D (Third Person)</option>
+            <option value="pong2D.js">Pong 2D</option>
+            <option value="pong3D.js">Pong 3D</option>
+            <option value="puzzle.js">Puzzle</option>
+            <option value="race2d.js">Race 2D</option>
+            <option value="race3d.js">Race 3D</option>
+            <option value="rpg2D.js">RPG 2D</option>
+            <option value="rpg3D.js">RPG 3D</option>
+            <option value="rubik.js">Rubik</option>
+            <option value="runner2D.js">Runner 2D</option>
+            <option value="runner3D.js">Runner 3D</option>
+            <option value="shooter2D.js">Shooter 2D</option>
+            <option value="snake2D.js">Snake 2D</option>
+            <option value="snake3D.js">Snake 3D</option>
+            <option value="spaceShooter2D.js">Space Shooter 2D</option>
+            <option value="spaceShooter3D.js">Space Shooter 3D</option>
+            <option value="survival2D.js">Survival 2D</option>
+            <option value="survival3D.js">Survival 3D</option>
+            <option value="towerDefense2D.js">Tower Defense 2D</option>
+            <option value="towerDefense3D.js">Tower Defense 3D</option>
+        </select>
+    </div>
+
+    <main class="main-content">
+        <div id="game-canvas-container">
+            <div class="game-placeholder">
+                <h2>Select a game from the dropdown to begin</h2>
+                <p>Choose a game template from the menu above to load it here.</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    // Utility to clear the game canvas container
+    function clearGameCanvas() {
+        const container = document.getElementById('game-canvas-container');
+        while (container.firstChild) {
+            // Remove previous injected <script> if any
+            const el = container.firstChild;
+            if (el.tagName === 'SCRIPT' && el.id === 'gamescript') {
+                el.remove();
+            } else {
+                container.removeChild(el);
+            }
+        }
+    }
+
+    // Show placeholder info (when no game selected)
+    function showPlaceholder() {
+        clearGameCanvas();
+        const ph = document.createElement('div');
+        ph.className = 'game-placeholder';
+        ph.innerHTML = `
+            <h2>Select a game from the dropdown to begin</h2>
+            <p>Choose a game template from the menu above to load it here.</p>
+        `;
+        document.getElementById('game-canvas-container').appendChild(ph);
+    }
+
+    // On selection change, load corresponding JS file
+    document.getElementById('game-selector').addEventListener('change', function() {
+        const val = this.value;
+        if (!val) {
+            showPlaceholder();
+        } else {
+            clearGameCanvas();
+            const script = document.createElement('script');
+            script.src = "template/" + val;
+            script.async = true;
+            script.onload = function() {
+                // callback if needed after loading user JS
+            };
+            script.onerror = function() {
+                showPlaceholder();
+                alert('Failed to load "'+val+'".');
+            };
+            script.id = "gamescript";
+            document.getElementById('game-canvas-container').appendChild(script);
+        }
+    });
+
+    // On page load: show placeholder
+    showPlaceholder();
+    </script>
+</body>
+</html>

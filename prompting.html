@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI GAME - Prompting</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/prompting.css">
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    
+
+    <main class="prompting-container">
+        <h1 class="page-title">Prompt here</h1>
+        
+        <div class="prompt-section">
+            <textarea class="prompt-input" placeholder="Enter your game prompt here..."></textarea>
+            <div class="language-selector">
+                <label>Output Language</label>
+                <select class="language-dropdown">
+                    <option value="threejs">Three.js</option>
+                    <option value="python">Python</option>
+                    <option value="php">PHP</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="java">Java</option>
+                </select>
+            </div>
+            <button class="generate-btn">Generate Game</button>
+        </div>
+
+        <div class="template-section">
+            <a href="template.html" class="template-btn">Template Games</a>
+        </div>
+    </main>
+
+    <script src="js/main.js"></script>
+    <script src="js/prompting.js"></script>
+</body>
+</html>
