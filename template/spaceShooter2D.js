@@ -1,260 +1,196 @@
-(function() {
-// === Space Shooter 2D (Refactored) ===
+(function () {
+    // ========== PRIVATE SCOPE ========== 
+    let state = null;
+    let loopId = null;
 
-// Game Settings
-const WORLD_W = 20;
-const WORLD_H = 16;
-const PLAYER_SPEED = 0.2;
-const PLAYER_HEALTH_INIT = 100;
-const PLAYER_DAMAGE = 20;
-const BULLET_SPEED = 0.5;
-const FIRE_RATE = 200; // ms
-const ENEMY_SPEED = 0.08;
-const ENEMY_SPAWN_RATE = 0.02; // probability per frame
+    const GAME_CONST = {
+        WORLD_W: 20, WORLD_H: 16, PLAYER_SPEED: 0.2, PLAYER_HEALTH_INIT: 100, PLAYER_DAMAGE: 20,
+        BULLET_SPEED: 0.5, FIRE_RATE: 200, ENEMY_SPEED: 0.08, ENEMY_SPAWN_RATE: 0.02,
+    };
+    
+    function GameState() {
+        this.scene = null; this.camera = null; this.renderer = null;
+        this.player = null; this.stars = [];
+        this.bullets = []; this.enemies = [];
+        this.keys = {};
+        this.score = 0; this.health = 0;
+        this.isGameOver = false;
+        this.lastShotTime = 0;
 
-// Globals
-let scene, camera, renderer;
-let player, stars = [];
-let bullets = [], enemies = [];
-let keys = {};
-let score, health;
-let isGameOver = false;
-let lastShotTime = 0;
+        this.hudMesh = null; this.overlayMesh = null;
+        this.boundKeyDown = null; this.boundKeyUp = null; this.boundResize = null;
+    }
 
-function init() {
-    // Scene
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000011);
+    function init() {
+        state = new GameState();
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x000011);
 
-    // Camera
-    camera = new THREE.OrthographicCamera(-WORLD_W / 2, WORLD_W / 2, WORLD_H / 2, -WORLD_H / 2, 0.1, 100);
-    camera.position.z = 10;
+        state.camera = new THREE.OrthographicCamera(-GAME_CONST.WORLD_W/2, GAME_CONST.WORLD_W/2, GAME_CONST.WORLD_H/2, -GAME_CONST.WORLD_H/2, 0.1, 100);
+        state.camera.position.z = 10;
+        
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById("game-canvas-container").appendChild(state.renderer.domElement);
+        
+        addLights(state.scene);
+        createStars(state);
+        
+        state.player = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 4), new THREE.MeshPhongMaterial({ color: 0x00ff00 }));
+        state.player.rotation.z = Math.PI; // Point upwards
+        state.scene.add(state.player);
 
-    // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.getElementById('game-canvas-container').appendChild(renderer.domElement);
+        state.boundKeyDown = e => { state.keys[e.code] = true; };
+        state.boundKeyUp = e => { state.keys[e.code] = false; };
+        state.boundResize = () => onResize(state);
+        window.addEventListener('keydown', state.boundKeyDown);
+        window.addEventListener('keyup', state.boundKeyUp);
+        window.addEventListener('resize', state.boundResize);
 
-    // Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambient);
-    const directional = new THREE.DirectionalLight(0xffffff, 0.5);
-    directional.position.set(5, 5, 5);
-    scene.add(directional);
-
-    // Stars
-    for (let i = 0; i < 200; i++) {
-        const starGeo = new THREE.SphereGeometry(0.05, 4, 4);
-        const starMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const star = new THREE.Mesh(starGeo, starMat);
-        star.position.set(
-            (Math.random() - 0.5) * WORLD_W * 2,
-            (Math.random() - 0.5) * WORLD_H * 2,
-            -5
-        );
-        stars.push(star);
-        scene.add(star);
+        resetGame(state);
+        animate();
     }
     
-    // Player
-    const playerGeo = new THREE.ConeGeometry(0.5, 1, 4);
-    const playerMat = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
-    player = new THREE.Mesh(playerGeo, playerMat);
-    player.rotation.z = Math.PI;
-    scene.add(player);
+    function resetGame(state) {
+        state.isGameOver = false; state.score = 0; state.health = GAME_CONST.PLAYER_HEALTH_INIT;
+        state.bullets.forEach(b => state.scene.remove(b)); state.enemies.forEach(e => state.scene.remove(e));
+        state.bullets = []; state.enemies = [];
+        state.player.position.set(0, -GAME_CONST.WORLD_H/2 + 1, 0);
+        state.player.visible = true;
 
-    document.getElementById('info').innerHTML = `
-        <b>Space Shooter 2D</b><br>
-        <span>[WASD] / [ARROWS] : Move</span><br>
-        <span>[SPACE] : Shoot</span>
-    `;
-
-    resetGame();
-
-    // Event Listeners
-    window.addEventListener('keydown', e => { keys[e.code] = true; });
-    window.addEventListener('keyup', e => { keys[e.code] = false; });
-    window.addEventListener('resize', onWindowResize);
-
-    animate();
-}
-
-function resetGame() {
-    // Clear old objects
-    bullets.forEach(b => scene.remove(b));
-    enemies.forEach(e => scene.remove(e));
-    bullets = [];
-    enemies = [];
-
-    // Reset state
-    score = 0;
-    health = PLAYER_HEALTH_INIT;
-    isGameOver = false;
-    document.getElementById('gameover').style.display = 'none';
+        clearOverlay(state);
+        updateHUD(state);
+    }
     
-    player.position.set(0, -WORLD_H/2 + 1, 0);
-    player.visible = true;
+    function animate() {
+        loopId = requestAnimationFrame(animate);
+        if(!state) return;
+        
+        if (state.isGameOver) {
+            if (state.keys['Enter'] || state.keys['KeyR']) resetGame(state);
+        } else {
+            updatePlayer(state);
+            spawnEnemy(state);
+            updateEntities(state);
+            checkCollisions(state);
+            updateHUD(state);
+        }
+        state.renderer.render(state.scene, state.camera);
+    }
 
-    updateHUD();
-}
+    function addLights(scene) { scene.add(new THREE.AmbientLight(0xffffff,0.7)); const l=new THREE.DirectionalLight(0xffffff,0.5); l.position.set(5,5,5); scene.add(l); }
+    function createStars(state) {
+        for (let i = 0; i < 200; i++) {
+            const star = new THREE.Mesh(new THREE.SphereGeometry(0.05, 4, 4), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+            star.position.set((Math.random()-0.5)*GAME_CONST.WORLD_W*2, (Math.random()-0.5)*GAME_CONST.WORLD_H*2, -5);
+            state.stars.push(star); state.scene.add(star);
+        }
+    }
+    
+    function updatePlayer(state) {
+        const bounds = { x: state.camera.right, y: state.camera.top };
+        if (state.keys['KeyW'] || state.keys['ArrowUp']) state.player.position.y = Math.min(bounds.y-0.5, state.player.position.y+GAME_CONST.PLAYER_SPEED);
+        if (state.keys['KeyS'] || state.keys['ArrowDown']) state.player.position.y = Math.max(-bounds.y+0.5, state.player.position.y-GAME_CONST.PLAYER_SPEED);
+        if (state.keys['KeyA'] || state.keys['ArrowLeft']) state.player.position.x = Math.max(-bounds.x+0.5, state.player.position.x-GAME_CONST.PLAYER_SPEED);
+        if (state.keys['KeyD'] || state.keys['ArrowRight']) state.player.position.x = Math.min(bounds.x-0.5, state.player.position.x+GAME_CONST.PLAYER_SPEED);
+        if (state.keys['Space'] && Date.now() - state.lastShotTime > GAME_CONST.FIRE_RATE) { shoot(state); state.lastShotTime = Date.now(); }
+    }
 
-function gameOver() {
-    isGameOver = true;
-    player.visible = false;
-    document.getElementById('gameover').style.display = 'block';
-}
+    function shoot(state) {
+        const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.15,6,6), new THREE.MeshPhongMaterial({color:0xffff00,emissive:0xffff00}));
+        bullet.position.copy(state.player.position).add(new THREE.Vector3(0,0.8,0));
+        state.bullets.push(bullet); state.scene.add(bullet);
+    }
 
-function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    camera.left = -WORLD_W / 2 * aspect;
-    camera.right = WORLD_W / 2 * aspect;
-    // Keep height constant
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
+    function spawnEnemy(state) {
+        if (Math.random() < GAME_CONST.ENEMY_SPAWN_RATE) {
+            const enemy = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), new THREE.MeshPhongMaterial({color:0xff0000}));
+            enemy.position.set((Math.random()-0.5)*(state.camera.right*2-1), state.camera.top, 0);
+            state.enemies.push(enemy); state.scene.add(enemy);
+        }
+    }
 
-function updatePlayer() {
-    const bounds = {
-        x: camera.right,
-        y: camera.top
+    function updateEntities(state) {
+        for (let i = state.bullets.length-1; i>=0; i--) {
+            const b = state.bullets[i]; b.position.y += GAME_CONST.BULLET_SPEED;
+            if (b.position.y > state.camera.top) { state.scene.remove(b); state.bullets.splice(i,1); }
+        }
+        for (let i = state.enemies.length-1; i>=0; i--) {
+            const e = state.enemies[i]; e.position.y -= GAME_CONST.ENEMY_SPEED;
+            if (e.position.y < -state.camera.top) { state.scene.remove(e); state.enemies.splice(i,1); }
+        }
+        state.stars.forEach(s => { s.position.y -= 0.05; if (s.position.y < -GAME_CONST.WORLD_H) s.position.y = GAME_CONST.WORLD_H; });
+    }
+
+    function checkCollisions(state) {
+        for (let i = state.bullets.length-1; i>=0; i--) for (let j = state.enemies.length-1; j>=0; j--) {
+            if (state.bullets[i] && state.enemies[j] && state.bullets[i].position.distanceTo(state.enemies[j].position) < 0.7) {
+                state.scene.remove(state.bullets[i]); state.scene.remove(state.enemies[j]);
+                state.bullets.splice(i,1); state.enemies.splice(j,1); state.score+=10; break;
+            }
+        }
+        for (let i = state.enemies.length-1; i>=0; i--) {
+            if (state.enemies[i] && state.player.position.distanceTo(state.enemies[i].position) < 0.8) {
+                state.scene.remove(state.enemies[i]); state.enemies.splice(i,1);
+                state.health -= GAME_CONST.PLAYER_DAMAGE;
+                if(state.health <= 0) handleEndGame(state);
+            }
+        }
+    }
+    
+    function handleEndGame(state) {
+        if(state.isGameOver) return;
+        state.isGameOver = true; state.player.visible = false;
+        showOverlay(state, `GAME OVER
+Score: ${state.score}
+
+[ENTER] to restart`, true);
+    }
+    
+    function onResize(state) {
+        const aspect = window.innerWidth / window.innerHeight;
+        state.camera.left = -GAME_CONST.WORLD_W/2; state.camera.right = GAME_CONST.WORLD_W/2;
+        state.camera.top = GAME_CONST.WORLD_H/2; state.camera.bottom = -GAME_CONST.WORLD_H/2;
+        if(aspect > GAME_CONST.WORLD_W/GAME_CONST.WORLD_H) { state.camera.left*=aspect/(GAME_CONST.WORLD_W/GAME_CONST.WORLD_H); state.camera.right*=aspect/(GAME_CONST.WORLD_W/GAME_CONST.WORLD_H); }
+        else { state.camera.top/=aspect/(GAME_CONST.WORLD_W/GAME_CONST.WORLD_H); state.camera.bottom/=aspect/(GAME_CONST.WORLD_W/GAME_CONST.WORLD_H); }
+        state.camera.updateProjectionMatrix(); state.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    function updateHUD(state) {
+        if(state.hudMesh) { state.scene.remove(state.hudMesh); disposeMesh(state.hudMesh); }
+        const text = `Health: ${state.health}\nScore: ${state.score}`;
+        state.hudMesh = createTextLabelMesh(text, { font: "24px Courier New", width: 300, height: 70, align: "left" });
+        const cam = state.camera;
+        state.hudMesh.position.set(cam.left + 2.5, cam.top - 1.5, 0);
+        state.scene.add(state.hudMesh);
+    }
+
+    function showOverlay(state, text, bg) { clearOverlay(state); state.overlayMesh = createTextLabelMesh(text, {font:"32px Courier New", align:"center", width:500,height:250,...(bg&&{bg:'rgba(0,0,0,0.8)'})}); state.overlayMesh.position.z=5; state.scene.add(state.overlayMesh); }
+    function clearOverlay(state) { if(state.overlayMesh) { state.scene.remove(state.overlayMesh); disposeMesh(state.overlayMesh); state.overlayMesh = null; } }
+    function disposeMesh(mesh) { if(mesh?.geometry) mesh.geometry.dispose(); if(mesh?.material) mesh.material.dispose(); }
+    function createTextLabelMesh(text, opts) {
+        const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+        const font=opts.font||"24px Arial", w=opts.width||512, h=opts.height||128;
+        canvas.width=w; canvas.height=h; ctx.font=font;
+        if(opts.bg){ctx.fillStyle=opts.bg; ctx.fillRect(0,0,w,h);}
+        ctx.fillStyle=opts.color||"#fff"; ctx.textAlign=opts.align||"center"; ctx.textBaseline="middle";
+        const lines=text.split("\n"), lH=h/lines.length, x=opts.align==='left'?20:w/2;
+        for(let i=0; i<lines.length; i++) ctx.fillText(lines[i], x, lH*(i+0.5));
+        const tex = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w/25, h/25), new THREE.MeshBasicMaterial({map:tex,transparent:true}));
+        mesh.renderOrder=10; return mesh;
+    }
+
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        if (loopId) cancelAnimationFrame(loopId);
+        window.removeEventListener('keydown', state.boundKeyDown);
+        window.removeEventListener('keyup', state.boundKeyUp);
+        window.removeEventListener('resize', state.boundResize);
+        if (state.renderer) { const c=state.renderer.domElement; if(c?.parentNode) c.parentNode.removeChild(c); state.renderer.dispose(); }
+        if (state.scene) state.scene.traverse(o => { if (o.isMesh) disposeMesh(o); });
+        state = null;
     };
 
-    if (keys['KeyW'] || keys['ArrowUp']) player.position.y = Math.min(bounds.y - 0.5, player.position.y + PLAYER_SPEED);
-    if (keys['KeyS'] || keys['ArrowDown']) player.position.y = Math.max(-bounds.y + 0.5, player.position.y - PLAYER_SPEED);
-    if (keys['KeyA'] || keys['ArrowLeft']) player.position.x = Math.max(-bounds.x + 0.5, player.position.x - PLAYER_SPEED);
-    if (keys['KeyD'] || keys['ArrowRight']) player.position.x = Math.min(bounds.x - 0.5, player.position.x + PLAYER_SPEED);
-
-    if (keys['Space'] && Date.now() - lastShotTime > FIRE_RATE) {
-        shoot();
-        lastShotTime = Date.now();
-    }
-}
-
-function shoot() {
-    const bulletGeo = new THREE.SphereGeometry(0.15, 6, 6);
-    const bulletMat = new THREE.MeshPhongMaterial({ color: 0xffff00, emissive: 0xffff00 });
-    const bullet = new THREE.Mesh(bulletGeo, bulletMat);
-    
-    bullet.position.copy(player.position);
-    bullet.position.y += 0.8;
-    
-    bullets.push(bullet);
-    scene.add(bullet);
-}
-
-function spawnEnemy() {
-    if (Math.random() < ENEMY_SPAWN_RATE) {
-        const enemyGeo = new THREE.BoxGeometry(1, 1, 1);
-        const enemyMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-        const enemy = new THREE.Mesh(enemyGeo, enemyMat);
-        
-        enemy.position.set(
-            (Math.random() - 0.5) * (camera.right * 2 - 1),
-            camera.top,
-            0
-        );
-        
-        enemies.push(enemy);
-        scene.add(enemy);
-    }
-}
-
-function updateEntities() {
-    // Update bullets
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const bullet = bullets[i];
-        bullet.position.y += BULLET_SPEED;
-        if (bullet.position.y > camera.top) {
-            scene.remove(bullet);
-            bullets.splice(i, 1);
-        }
-    }
-
-    // Update enemies
-    for (let i = enemies.length - 1; i >= 0; i--) {
-        const enemy = enemies[i];
-        enemy.position.y -= ENEMY_SPEED;
-        if (enemy.position.y < -camera.top) {
-            scene.remove(enemy);
-            enemies.splice(i, 1);
-        }
-    }
-    
-    // Update stars
-    stars.forEach(star => {
-        star.position.y -= 0.05;
-        if (star.position.y < -WORLD_H) {
-            star.position.y = WORLD_H;
-        }
-    });
-}
-
-function checkCollisions() {
-    // Bullets vs Enemies
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        for (let j = enemies.length - 1; j >= 0; j--) {
-            if (bullets[i] && enemies[j] && bullets[i].position.distanceTo(enemies[j].position) < 0.7) {
-                scene.remove(bullets[i]);
-                scene.remove(enemies[j]);
-                bullets.splice(i, 1);
-                enemies.splice(j, 1);
-                score += 10;
-                break;
-            }
-        }
-    }
-
-    // Player vs Enemies
-    for (let i = enemies.length - 1; i >= 0; i--) {
-        if (enemies[i] && player.position.distanceTo(enemies[i].position) < 0.8) {
-            scene.remove(enemies[i]);
-            enemies.splice(i, 1);
-            health -= PLAYER_DAMAGE;
-            if (health <= 0) {
-                health = 0;
-                gameOver();
-            }
-        }
-    }
-}
-
-function updateHUD() {
-    document.getElementById('score').textContent = `Score: ${score}`;
-    document.getElementById('health').textContent = `Health: ${health}`;
-
-    // Hide unused stats
-    document.getElementById('lives').style.display = 'none';
-    document.getElementById('timer').style.display = 'none';
-    document.getElementById('phase').style.display = 'none';
-    document.getElementById('pong-score').style.display = 'none';
-    if(document.getElementById('race3d-ui')) document.getElementById('race3d-ui').style.display = 'none';
-    document.getElementById('message').style.display = 'none';
-    document.getElementById('countdown').style.display = 'none';
-
-    // Specific HUD for Shooter
-    document.getElementById('game-stats').innerHTML = `
-        <span id="health">Health: ${health}</span><br>
-        <span id="score">Score: ${score}</span>
-    `;
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-
-    if (isGameOver) {
-        if (keys['Enter']) {
-            resetGame();
-        }
-    } else {
-        updatePlayer();
-        spawnEnemy();
-        updateEntities();
-        checkCollisions();
-        updateHUD();
-    }
-
-    renderer.render(scene, camera);
-}
-
-init();
+    init();
 })();

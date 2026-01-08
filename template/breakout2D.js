@@ -1,346 +1,372 @@
-(function() {
-// === Breakout 2D Game (Standalone, No HTML UI, H for Hint) ===
+(function () {
+    // ========== PRIVATE SCOPE ========== 
+    let state = null;
+    let loopId = null;
 
-// Game Settings
-const WORLD_W = 20;
-const WORLD_H = 26;
-const PADDLE_W = 3;
-const PADDLE_H = 0.5;
-const PADDLE_Y = -WORLD_H / 2 + 2;
-const BALL_RADIUS = 0.25;
-const BALL_SPEED_INIT = 0.25;
-const LIVES_INIT = 3;
-const BRICK_ROWS = 6;
-const BRICK_COLS = 8;
-const BRICK_H = 0.8;
-const BRICK_W = (WORLD_W - 1) / BRICK_COLS - 0.2;
-const BRICK_COLORS = [0xcc0000, 0xcc6600, 0xcccc00, 0x00cc00, 0x0066cc, 0x6600cc];
+    const GAME_CONST = {
+        WORLD_W: 20,
+        WORLD_H: 26,
+        PADDLE_W: 3.5,
+        PADDLE_H: 0.5,
+        PADDLE_Y: -11,
+        BALL_RADIUS: 0.25,
+        BALL_SPEED_INIT: 0.25,
+        LIVES_INIT: 3,
+        BRICK_ROWS: 6,
+        BRICK_COLS: 8,
+    };
+    GAME_CONST.BRICK_W = (GAME_CONST.WORLD_W - 1) / GAME_CONST.BRICK_COLS - 0.2;
+    GAME_CONST.BRICK_H = 0.8;
+    const BRICK_COLORS = [0xcc0000, 0xcc6600, 0xcccc00, 0x00cc00, 0x0066cc, 0x6600cc];
 
-// Globals
-let scene, camera, renderer;
-let paddle, ball, bricks = [];
-let ballVelocity;
-let keys = {};
-let score, lives, bricksRemaining;
-let isGameActive = false;
-let isGameOver = false;
-let showHintOverlay = false;
-let gameCanvasContainer;
 
-//Overlay DOM
-let overlayDiv = null;
+    function GameState() {
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.paddle = null;
+        this.ball = null;
+        this.bricks = [];
+        this.ballVelocity = new THREE.Vector2(0, 0);
+        this.keys = {};
+        this.score = 0;
+        this.lives = 0;
+        this.bricksRemaining = 0;
+        this.isGameActive = false;
+        this.isGameOver = false;
 
-function showHint() {
-    if (overlayDiv) return;
-    overlayDiv = document.createElement('div');
-    overlayDiv.style.position = 'fixed';
-    overlayDiv.style.top = 0;
-    overlayDiv.style.left = 0;
-    overlayDiv.style.width = '100vw';
-    overlayDiv.style.height = '100vh';
-    overlayDiv.style.background = 'rgba(0,0,40,0.97)';
-    overlayDiv.style.zIndex = 9999;
-    overlayDiv.style.display = 'flex';
-    overlayDiv.style.alignItems = 'center';
-    overlayDiv.style.justifyContent = 'center';
-    overlayDiv.style.flexDirection = 'column';
-    overlayDiv.style.fontFamily = 'Instrument Sans,Arial,sans-serif';
-    overlayDiv.style.fontSize = '2em';
-    overlayDiv.style.color = '#fff';
-    overlayDiv.innerHTML = `
-        <div style="text-align: center; max-width: 90vw; padding: 32px;">
-            <div style="font-size:2.6em;font-weight:bold;margin-bottom:0.5em;">Breakout 2D</div>
-            <div>
-                <b>Petunjuk:</b><br>
-                <span>Gerakkan mouse : Menggerakkan paddle</span><br>
-                <span>Klik kiri : Melepaskan bola</span><br>
-                <span>Tahan paddle untuk memantulkan<br>bola ke arah yang diinginkan</span><br><br>
-                <span>Tekan <b>[ESC]</b> untuk menutup petunjuk ini.</span>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlayDiv);
-    showHintOverlay = true;
-}
+        this.hudMesh = null;
+        this.overlayMesh = null;
 
-function hideHint() {
-    if (overlayDiv) {
-        overlayDiv.parentNode.removeChild(overlayDiv);
-        overlayDiv = null;
+        // cleanup list
+        this.boundKeydown = null;
+        this.boundKeyup = null;
+        this.boundResize = null;
+        this.boundMousemove = null;
+        this.boundMousedown = null;
     }
-    showHintOverlay = false;
-}
 
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000022);
+    function init() {
+        state = new GameState();
 
-    gameCanvasContainer = document.getElementById('game-canvas-container');
-    const aspectRatio = gameCanvasContainer.offsetWidth / gameCanvasContainer.offsetHeight;
+        // Scene
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x000022);
 
-    camera = new THREE.OrthographicCamera(
-        -WORLD_W / 2 * aspectRatio, WORLD_W / 2 * aspectRatio,
-        WORLD_H / 2, -WORLD_H / 2,
-        0.1, 100
-    );
-    camera.position.z = 10;
+        // Camera
+        state.camera = new THREE.OrthographicCamera(
+            -GAME_CONST.WORLD_W / 2, GAME_CONST.WORLD_W / 2,
+            GAME_CONST.WORLD_H / 2, -GAME_CONST.WORLD_H / 2,
+            0.1, 100
+        );
+        state.camera.position.z = 10;
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(gameCanvasContainer.offsetWidth, gameCanvasContainer.offsetHeight);
-    gameCanvasContainer.appendChild(renderer.domElement);
+        // Renderer
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById("game-canvas-container").appendChild(state.renderer.domElement);
 
-    const light = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(light);
-    const pointLight = new THREE.PointLight(0xffffff, 0.8);
-    pointLight.position.set(0, 0, 5);
-    scene.add(pointLight);
+        // Lights
+        state.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const pointLight = new THREE.PointLight(0xffffff, 0.8);
+        pointLight.position.set(0, 0, 5);
+        state.scene.add(pointLight);
 
-    const paddleGeo = new THREE.BoxGeometry(PADDLE_W, PADDLE_H, 1);
-    const paddleMat = new THREE.MeshStandardMaterial({ color: 0x00ccff });
-    paddle = new THREE.Mesh(paddleGeo, paddleMat);
-    scene.add(paddle);
+        // Game Objects
+        state.paddle = new THREE.Mesh(
+            new THREE.BoxGeometry(GAME_CONST.PADDLE_W, GAME_CONST.PADDLE_H, 1),
+            new THREE.MeshStandardMaterial({ color: 0x00ccff })
+        );
+        state.scene.add(state.paddle);
 
-    const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 16, 16);
-    const ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    ball = new THREE.Mesh(ballGeo, ballMat);
-    scene.add(ball);
+        state.ball = new THREE.Mesh(
+            new THREE.SphereGeometry(GAME_CONST.BALL_RADIUS, 16, 16),
+            new THREE.MeshStandardMaterial({ color: 0xffffff })
+        );
+        state.scene.add(state.ball);
 
-    resetGame();
+        // Event Listeners
+        state.boundKeydown = e => onKeyDown(e, state);
+        state.boundKeyup = e => { state.keys[e.code] = false; };
+        state.boundResize = () => onResize(state);
+        state.boundMousemove = e => onMouseMove(e, state);
+        state.boundMousedown = () => onMouseDown(state);
 
-    window.addEventListener('keydown', e => {
-        keys[e.code] = true;
-        // Handle 'H' for hint, and Escape to close overlay
-        if (!showHintOverlay && (e.key === 'h' || e.key === 'H')) {
-            showHint();
-        } else if (showHintOverlay && (e.key === 'Escape' || e.key === 'Esc')) {
-            hideHint();
-        }
-    });
-    window.addEventListener('keyup', e => { keys[e.code] = false; });
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('resize', onWindowResize);
-
-    animate();
-}
-
-function resetGame() {
-    isGameOver = false;
-    isGameActive = false;
-    score = 0;
-    lives = LIVES_INIT;
+        window.addEventListener('keydown', state.boundKeydown);
+        window.addEventListener('keyup', state.boundKeyup);
+        window.addEventListener('resize', state.boundResize);
+        window.addEventListener('mousemove', state.boundMousemove);
+        window.addEventListener('mousedown', state.boundMousedown);
+        
+        resetGame(state);
+        animate();
+    }
     
-    // Remove all overlays/petunjuk
-    hideHint();
-
-    buildBricks();
-    resetPaddleAndBall();
-}
-
-function buildBricks() {
-    bricks.forEach(b => scene.remove(b));
-    bricks = [];
-    const startY = WORLD_H / 2 - 4;
+    function resetGame(state) {
+        state.isGameOver = false;
+        state.isGameActive = false;
+        state.score = 0;
+        state.lives = GAME_CONST.LIVES_INIT;
+        
+        clearOverlay(state);
+        buildBricks(state);
+        resetPaddleAndBall(state);
+        updateHUD(state);
+    }
     
-    for (let r = 0; r < BRICK_ROWS; r++) {
-        for (let c = 0; c < BRICK_COLS; c++) {
-            const brickGeo = new THREE.BoxGeometry(BRICK_W, BRICK_H, 1);
-            const brickMat = new THREE.MeshStandardMaterial({ color: BRICK_COLORS[r % BRICK_COLORS.length] });
-            const brick = new THREE.Mesh(brickGeo, brickMat);
-            
-            brick.position.x = (c - BRICK_COLS / 2 + 0.5) * (BRICK_W + 0.2);
-            brick.position.y = startY - r * (BRICK_H + 0.2);
-            
-            bricks.push(brick);
-            scene.add(brick);
+    function animate() {
+        loopId = requestAnimationFrame(animate);
+        if (!state) return;
+
+        if (state.isGameOver) {
+            if (state.keys['Enter']) {
+                resetGame(state);
+            }
+        } else if (state.isGameActive) {
+            state.ball.position.x += state.ballVelocity.x;
+            state.ball.position.y += state.ballVelocity.y;
+            checkCollisions(state);
+        }
+
+        state.renderer.render(state.scene, state.camera);
+    }
+    
+    function onKeyDown(e, state) {
+        state.keys[e.code] = true;
+        if (state.overlayMesh && (e.key === 'Escape' || e.key === 'Esc')) {
+            clearOverlay(state);
+        }
+        if (!state.overlayMesh && (e.key === 'h' || e.key === 'H')) {
+            showHint(state);
         }
     }
-    bricksRemaining = bricks.length;
-}
-
-function resetPaddleAndBall() {
-    isGameActive = false;
-    paddle.position.set(0, PADDLE_Y, 0);
-    ball.position.set(0, PADDLE_Y + PADDLE_H / 2 + BALL_RADIUS, 0);
-    ballVelocity = new THREE.Vector2(0, 0);
-}
-
-function launchBall() {
-    if (isGameActive) return;
-    isGameActive = true;
-    ballVelocity.set(
-        (Math.random() - 0.5) * 0.1,
-        BALL_SPEED_INIT
-    );
-}
-
-function onMouseMove(e) {
-    if (showHintOverlay) return;
-    const rect = renderer.domElement.getBoundingClientRect();
-    const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const paddleLimit = WORLD_W / 2 - PADDLE_W / 2;
-    paddle.position.x = THREE.MathUtils.clamp(mouseX * (WORLD_W / 2), -paddleLimit, paddleLimit);
-    if (!isGameActive) {
-        ball.position.x = paddle.position.x;
+    
+    function showHint(state) {
+        if (state.overlayMesh) return;
+        const msg = `Hint:\n- Move mouse to move paddle\n- Left click to launch ball\n- Bounce ball at different\n  paddle angles to aim\n\n[ESC] to close hint`;
+        state.overlayMesh = createTextLabelMesh(msg, {
+            font: "24px Courier New", align: "center", width: 500, height: 300, bg: "rgba(0,0,30,0.9)"
+        });
+        state.overlayMesh.position.z = 5;
+        state.scene.add(state.overlayMesh);
     }
-}
-
-function onMouseDown(e) {
-    if (showHintOverlay) return;
-    if (isGameOver) return;
-    launchBall();
-}
-
-function handleEndGame(isWin) {
-    isGameOver = true;
-    isGameActive = false;
-    // Show fullscreen overlay for end game message
-    if (overlayDiv) hideHint();
-    overlayDiv = document.createElement('div');
-    overlayDiv.style.position = 'fixed';
-    overlayDiv.style.top = 0;
-    overlayDiv.style.left = 0;
-    overlayDiv.style.width = '100vw';
-    overlayDiv.style.height = '100vh';
-    overlayDiv.style.background = 'rgba(0,0,40,0.98)';
-    overlayDiv.style.zIndex = 9999;
-    overlayDiv.style.display = 'flex';
-    overlayDiv.style.alignItems = 'center';
-    overlayDiv.style.justifyContent = 'center';
-    overlayDiv.style.flexDirection = 'column';
-    overlayDiv.style.fontFamily = 'Instrument Sans,Arial,sans-serif';
-    overlayDiv.style.fontSize = '2.5em';
-    overlayDiv.style.color = '#fff';
-
-    overlayDiv.innerHTML = `
-        <div style="text-align: center; max-width: 90vw; padding: 38px;">
-            <div style="font-size:2.8em;font-weight:bold;">
-                ${isWin ? 'YOU WIN!' : 'GAME OVER'}
-            </div>
-            <div style="font-size:1em;margin:1em 0 1.3em 0;letter-spacing:0.04em;">Score: ${score}</div>
-            <div style="font-size:1.1em;">Tekan <b>[ENTER]</b> untuk mengulang</div>
-            <div style="font-size:1em; margin-top: 1.6em; color:#afc;opacity:0.7;">Tekan <b>[H]</b> untuk petunjuk / hint</div>
-        </div>
-    `;
-    document.body.appendChild(overlayDiv);
-    showHintOverlay = true;
-}
-
-function onWindowResize() {
-    const newWidth = gameCanvasContainer.offsetWidth;
-    const newHeight = gameCanvasContainer.offsetHeight;
-
-    renderer.setSize(newWidth, newHeight);
-
-    const aspectRatio = newWidth / newHeight;
-    camera.left = -WORLD_W / 2 * aspectRatio;
-    camera.right = WORLD_W / 2 * aspectRatio;
-    camera.top = WORLD_H / 2;
-    camera.bottom = -WORLD_H / 2;
-    camera.updateProjectionMatrix();
-}
-
-function checkCollisions() {
-    const ballBox = new THREE.Box3().setFromObject(ball);
-
-    // Walls
-    if (ball.position.x > WORLD_W / 2 - BALL_RADIUS || ball.position.x < -WORLD_W / 2 + BALL_RADIUS) {
-        ballVelocity.x *= -1;
-        ball.position.x = THREE.MathUtils.clamp(ball.position.x, -WORLD_W / 2 + BALL_RADIUS, WORLD_W / 2 + BALL_RADIUS);
-    }
-    if (ball.position.y > WORLD_H / 2 - BALL_RADIUS) {
-        ballVelocity.y *= -1;
-        ball.position.y = WORLD_H / 2 - BALL_RADIUS;
+    
+    function handleEndGame(state, isWin) {
+        state.isGameOver = true;
+        state.isGameActive = false;
+        const msg = `${isWin ? 'YOU WIN!' : 'GAME OVER'}\nScore: ${state.score}\n\n[ENTER] to restart`;
+        state.overlayMesh = createTextLabelMesh(msg, {
+            font: "32px Courier New", align: "center", width: 500, height: 250, bg: "rgba(30,0,0,0.9)"
+        });
+        state.overlayMesh.position.z = 5;
+        state.scene.add(state.overlayMesh);
     }
 
-    // Bottom (lose life)
-    if (ball.position.y < -WORLD_H / 2) {
-        lives--;
-        if (lives <= 0) {
-            handleEndGame(false);
-        } else {
-            resetPaddleAndBall();
+    function clearOverlay(state) {
+        if (state.overlayMesh) {
+            state.scene.remove(state.overlayMesh);
+            disposeMesh(state.overlayMesh);
+            state.overlayMesh = null;
         }
-        return;
     }
 
-    // Paddle
-    const paddleBox = new THREE.Box3().setFromObject(paddle);
-    if (ballVelocity.y < 0 && ballBox.intersectsBox(paddleBox)) {
-        ballVelocity.y *= -1;
-        const hitPos = (ball.position.x - paddle.position.x) / (PADDLE_W / 2);
-        ballVelocity.x = THREE.MathUtils.clamp(hitPos, -1, 1) * BALL_SPEED_INIT;
-        ball.position.y = paddle.position.y + PADDLE_H/2 + BALL_RADIUS; // prevent sticking
+    function buildBricks(state) {
+        state.bricks.forEach(b => state.scene.remove(b));
+        state.bricks = [];
+        const startY = GAME_CONST.WORLD_H / 2 - 4;
+
+        for (let r = 0; r < GAME_CONST.BRICK_ROWS; r++) {
+            for (let c = 0; c < GAME_CONST.BRICK_COLS; c++) {
+                const brick = new THREE.Mesh(
+                    new THREE.BoxGeometry(GAME_CONST.BRICK_W, GAME_CONST.BRICK_H, 1),
+                    new THREE.MeshStandardMaterial({ color: BRICK_COLORS[r % BRICK_COLORS.length] })
+                );
+                brick.position.x = (c - GAME_CONST.BRICK_COLS / 2 + 0.5) * (GAME_CONST.BRICK_W + 0.2);
+                brick.position.y = startY - r * (GAME_CONST.BRICK_H + 0.2);
+                state.bricks.push(brick);
+                state.scene.add(brick);
+            }
+        }
+        state.bricksRemaining = state.bricks.length;
     }
 
-    // Bricks
-    for (let i = bricks.length - 1; i >= 0; i--) {
-        const brick = bricks[i];
-        const brickBox = new THREE.Box3().setFromObject(brick);
-        if (ballBox.intersectsBox(brickBox)) {
-            scene.remove(brick);
-            bricks.splice(i, 1);
-            score += 10;
-            bricksRemaining--;
+    function resetPaddleAndBall(state) {
+        state.isGameActive = false;
+        state.paddle.position.set(0, GAME_CONST.PADDLE_Y, 0);
+        state.ball.position.set(0, GAME_CONST.PADDLE_Y + GAME_CONST.PADDLE_H / 2 + GAME_CONST.BALL_RADIUS, 0);
+        state.ballVelocity.set(0, 0);
+    }
 
-            const overlap = ballBox.clone().intersect(brickBox);
-            const overlapSize = new THREE.Vector3();
-            overlap.getSize(overlapSize);
+    function onMouseMove(e, state) {
+        if (state.overlayMesh) return;
+        const rect = state.renderer.domElement.getBoundingClientRect();
+        const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const paddleLimit = GAME_CONST.WORLD_W / 2 - GAME_CONST.PADDLE_W / 2;
+        state.paddle.position.x = THREE.MathUtils.clamp(mouseX * (GAME_CONST.WORLD_W / 2), -paddleLimit, paddleLimit);
+        if (!state.isGameActive) {
+            state.ball.position.x = state.paddle.position.x;
+        }
+    }
 
-            if (overlapSize.x < overlapSize.y) {
-                ballVelocity.x *= -1;
-                if (ball.position.x < brick.position.x)
-                    ball.position.x = brickBox.min.x - BALL_RADIUS;
-                else
-                    ball.position.x = brickBox.max.x + BALL_RADIUS;
+    function onMouseDown(state) {
+        if (state.overlayMesh || state.isGameOver || state.isGameActive) return;
+        state.isGameActive = true;
+        state.ballVelocity.set((Math.random() - 0.5) * 0.1, GAME_CONST.BALL_SPEED_INIT);
+    }
+    
+    function checkCollisions(state) {
+        const ballBox = new THREE.Box3().setFromObject(state.ball);
+
+        // Walls
+        const halfW = GAME_CONST.WORLD_W / 2;
+        const halfH = GAME_CONST.WORLD_H / 2;
+        if (state.ball.position.x > halfW - GAME_CONST.BALL_RADIUS || state.ball.position.x < -halfW + GAME_CONST.BALL_RADIUS) {
+            state.ballVelocity.x *= -1;
+            state.ball.position.x = THREE.MathUtils.clamp(state.ball.position.x, -halfW + GAME_CONST.BALL_RADIUS, halfW - GAME_CONST.BALL_RADIUS);
+        }
+        if (state.ball.position.y > halfH - GAME_CONST.BALL_RADIUS) {
+            state.ballVelocity.y *= -1;
+            state.ball.position.y = halfH - GAME_CONST.BALL_RADIUS;
+        }
+
+        // Bottom (lose life)
+        if (state.ball.position.y < -halfH) {
+            state.lives--;
+            updateHUD(state);
+            if (state.lives <= 0) {
+                handleEndGame(state, false);
             } else {
-                ballVelocity.y *= -1;
-                if (ball.position.y < brick.position.y)
-                    ball.position.y = brickBox.min.y - BALL_RADIUS;
-                else
-                    ball.position.y = brickBox.max.y + BALL_RADIUS;
+                resetPaddleAndBall(state);
             }
-            
-            if (bricksRemaining <= 0) {
-                handleEndGame(true);
+            return;
+        }
+
+        // Paddle
+        const paddleBox = new THREE.Box3().setFromObject(state.paddle);
+        if (state.ballVelocity.y < 0 && ballBox.intersectsBox(paddleBox)) {
+            state.ballVelocity.y *= -1;
+            const hitPos = (state.ball.position.x - state.paddle.position.x) / (GAME_CONST.PADDLE_W / 2);
+            state.ballVelocity.x = THREE.MathUtils.clamp(hitPos, -1, 1) * GAME_CONST.BALL_SPEED_INIT;
+            state.ball.position.y = state.paddle.position.y + GAME_CONST.PADDLE_H/2 + GAME_CONST.BALL_RADIUS;
+        }
+
+        // Bricks
+        for (let i = state.bricks.length - 1; i >= 0; i--) {
+            const brick = state.bricks[i];
+            const brickBox = new THREE.Box3().setFromObject(brick);
+            if (ballBox.intersectsBox(brickBox)) {
+                state.scene.remove(brick);
+                state.bricks.splice(i, 1);
+                state.score += 10;
+                state.bricksRemaining--;
+                updateHUD(state);
+
+                const overlap = ballBox.clone().intersect(brickBox);
+                const overlapSize = new THREE.Vector3();
+                overlap.getSize(overlapSize);
+                
+                state.ballVelocity[overlapSize.x < overlapSize.y ? 'x' : 'y'] *= -1;
+
+                if (state.bricksRemaining <= 0) {
+                    handleEndGame(state, true);
+                }
+                break;
             }
-            break;
         }
-    }
-}
-
-function drawHUD() {
-    // Nothing; no permanent HTML HUD used
-    // For demonstration, the code can optionally draw overlays in canvas here, but per prompt, we'll skip permanent elements.
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-
-    if (showHintOverlay) {
-        // game paused if petunjuk/hint overlay or result overlay shown
-        renderer.render(scene, camera);
-        return;
-    }
-
-    if (isGameOver) {
-        if (keys['Enter']) {
-            keys['Enter'] = false;
-            hideHint();
-            resetGame();
-        }
-    } else if (isGameActive) {
-        ball.position.x += ballVelocity.x;
-        ball.position.y += ballVelocity.y;
-        checkCollisions();
     }
     
-    renderer.render(scene, camera);
+    function updateHUD(state) {
+        if (state.hudMesh) {
+            state.scene.remove(state.hudMesh);
+            disposeMesh(state.hudMesh);
+        }
+        const text = `Score: ${state.score}\nLives: ${state.lives}`;
+        state.hudMesh = createTextLabelMesh(text, { font: "20px Courier New", width: 250, height: 60, align: "left" });
+        state.hudMesh.position.set(-GAME_CONST.WORLD_W/2 + 3.2, GAME_CONST.WORLD_H/2 - 1.8, 0);
+        state.scene.add(state.hudMesh);
+    }
+    
+    function onResize(state) {
+        state.camera.aspect = window.innerWidth / window.innerHeight;
+        state.camera.updateProjectionMatrix();
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    // Standard utility functions
+    function disposeMesh(mesh) {
+        if (!mesh) return;
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) {
+            if (mesh.material.map) mesh.material.map.dispose();
+            mesh.material.dispose();
+        }
+    }
 
-    // Optionally, draw the HUD (score/lives) with a 2D overlay or WebGL
-    // But per prompt, no permanent overlay; all info goes via hint/end overlays.
-}
+    function createTextLabelMesh(text, opts) {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const font = opts.font || "24px Arial";
+        ctx.font = font;
+        
+        const lines = text.split("\n");
+        const metrics = lines.map(line => ctx.measureText(line));
+        const textWidth = Math.max(...metrics.map(m => m.width));
+        const textHeight = metrics.reduce((sum, m) => sum + (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent), 0) * 1.2;
 
-init();
+        const width = opts.width || THREE.MathUtils.ceilPowerOfTwo(textWidth)
+        const height = opts.height || THREE.MathUtils.ceilPowerOfTwo(textHeight)
+        canvas.width = width;
+        canvas.height = height;
+        
+        ctx.font = font; // reset font after resize
+        if (opts.bg) {
+            ctx.fillStyle = opts.bg;
+            ctx.fillRect(0, 0, width, height);
+        }
+        ctx.fillStyle = opts.color || "#fff";
+        ctx.textAlign = opts.align || "center";
+        ctx.textBaseline = "middle";
 
+        const lineH = height / lines.length;
+        for (let i = 0; i < lines.length; i++) {
+             ctx.fillText(lines[i], opts.align === "left" ? 10 : width / 2, lineH * (i + 0.5));
+        }
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(width/50, height/50),
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false })
+        );
+        mesh.renderOrder = 10;
+        return mesh;
+    }
+
+    // =============== EXPORT DESTROY HANDLER ===============
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        if (loopId) cancelAnimationFrame(loopId);
+        
+        window.removeEventListener('keydown', state.boundKeydown);
+        window.removeEventListener('keyup', state.boundKeyup);
+        window.removeEventListener('resize', state.boundResize);
+        window.removeEventListener('mousemove', state.boundMousemove);
+        window.removeEventListener('mousedown', state.boundMousedown);
+
+        if (state.renderer) {
+            if (state.renderer.domElement?.parentNode) {
+                state.renderer.domElement.parentNode.removeChild(state.renderer.domElement);
+            }
+            state.renderer.dispose();
+            try { state.renderer.forceContextLoss(); } catch(e){}
+            state.renderer = null;
+        }
+
+        if (state.scene) {
+            state.scene.traverse(obj => { if (obj.isMesh) disposeMesh(obj); });
+        }
+        state = null;
+    };
+
+    init();
 })();

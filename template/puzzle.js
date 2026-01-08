@@ -1,473 +1,611 @@
-(function() {
-const GRID_SIZE = 6;
-const CAM_Y = 12;
-const COLORS_BY_PHASE = [
-    [0xff4d4d, 0x4dff7a, 0x4d7aff, 0xffd24d, 0xff4dd6, 0x4dfff0],
-    [0x005fff, 0x00ffe7, 0x00bfff, 0x00ff9f, 0x009fff, 0x00eaff],
-    [0x0077ff, 0x0099ff, 0x00bbff, 0x33ccff, 0x3399ff, 0x33bbff],
-];
-const PHASE_THRESHOLDS = [0, 200, 500, 1000];
+(function () {
+    // ======= PRIVATE SCOPE - Three.js only puzzle (no HTML IDs) ======
+    let state = null;
+    let loopId = null;
 
-// GLOBALS
-let scene, camera, renderer, clock;
-let grid = [];
-let colorSet = COLORS_BY_PHASE[0];
-let score = 0;
-let phase = 1;
-let gameState = 'idle'; // idle, animating, game_over
-let selected = null; // selected cell for swapping
-
-// UTIL: grid positions
-const TILE_SIZE = 1;
-const GAP = 0.2;
-const getGridCoord = (i, size) => i * (TILE_SIZE + GAP) - (size - 1) * (TILE_SIZE + GAP) / 2;
-const getGridX = (x) => getGridCoord(x, GRID_SIZE);
-const getGridZ = (y) => getGridCoord(y, GRID_SIZE);
-
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x333333);
-    clock = new THREE.Clock();
-
-    const aspect = window.innerWidth / window.innerHeight;
-    camera = new THREE.OrthographicCamera(-8*aspect, 8*aspect, 8, -8, 1, 100);
-    camera.position.set(0, CAM_Y, 0);
-    camera.lookAt(0, 0, 0);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.getElementById('game-canvas-container').appendChild(renderer.domElement);
-
-    const amb = new THREE.AmbientLight(0xffffff, 0.9);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-    dir.position.set(5, 10, 5);
-    scene.add(amb, dir);
-
-    document.getElementById('info').innerHTML = `
-        <b>3D Match Puzzle</b><br>
-        <span>Click a block, then click an adjacent block to swap.</span><br>
-        <span>Match 3+ to score. Press [ENTER] to restart.</span>
-    `;
-
-    // soft floor plane for visual grounding
-    const plane = new THREE.Mesh(
-        new THREE.PlaneGeometry(40, 40),
-        new THREE.MeshStandardMaterial({ color: 0x111111 })
-    );
-    plane.rotation.x = -Math.PI/2;
-    plane.position.y = -0.26;
-    scene.add(plane);
-
-    window.addEventListener('resize', onWindowResize);
-    window.addEventListener('keydown', onKeyDown);
-    renderer.domElement.addEventListener('pointerdown', onPointerDown);
-
-    resetGame();
-    animate();
-}
-
-function resetGame() {
-    // clear
-    for (let x = 0; x < grid.length; x++) {
-        for (let y = 0; y < (grid[x]||[]).length; y++) {
-            const c = grid[x][y];
-            if (c && c.mesh) scene.remove(c.mesh);
-        }
-    }
-    grid = [];
-    score = 0;
-    phase = 1;
-    colorSet = COLORS_BY_PHASE[0];
-    gameState = 'idle';
-    selected = null;
-    document.getElementById('gameover').style.display = 'none';
-
-    // init grid data
-    for (let x = 0; x < GRID_SIZE; x++) {
-        grid[x] = [];
-        for (let y = 0; y < GRID_SIZE; y++) {
-            grid[x][y] = { mesh: null, colorIndex: -1, x, y };
-        }
+    function GameState() {
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.clock = null;
+        this.hudCanvas = null;
+        this.hudTexture = null;
+        this.hudMesh = null;
+        this.orthoCamera = null;
+        this.grid = [];
+        this.colorSets = null;
+        this.score = 0;
+        this.phase = 1;
+        this.mistakes = 0;
+        this.MAX_MISTAKES = 10;
+        this.dragging = null;
+        this.dragOffset = new THREE.Vector3();
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.boundResize = null;
+        this.gameOver = false;
     }
 
-    fillGridPreventInstantMatches(() => {
-        updateHUD();
-        // ensure there's at least one possible move; if not, reshuffle
-        if (!hasPossibleMoves()) reshuffleGrid();
-    });
-}
+    // CONFIG
+    const GRID_SIZE = 6;
+    const TILE_SIZE = 1;
+    const GAP = 0.15;
+    const CAM_Y = 12;
+    const PHASE_THRESHOLDS = [0, 200, 500, 1000, 2000];
 
-// create a cube mesh
-function makeCube(color) {
-    const geo = new THREE.BoxGeometry(TILE_SIZE, 0.5, TILE_SIZE);
-    const mat = new THREE.MeshStandardMaterial({ color });
-    return new THREE.Mesh(geo, mat);
-}
+    const COLORS_BY_PHASE = [
+        [0x3b2f2f, 0x2e2424, 0x241b1b, 0x1a1313, 0x120d0d, 0x0a0707],
+        [0xf5e6c8, 0xf0dfbe, 0xebd7b3, 0xe4cfa8, 0xdfc89e, 0xd8c095],
+        [0xbfbfbf, 0xb5b5b5, 0xababab, 0xa2a2a2, 0x999999, 0x909090],
+        [0xff2b2b, 0xff1f1f, 0xff1414, 0xff0808, 0xf70000, 0xea0000],
+        [0x111111, 0x0f0f0f, 0x0d0d0d, 0x0b0b0b, 0x090909, 0x070707]
+    ];
 
-function createCell(x, y, colorIndex) {
-    const mesh = makeCube(colorSet[colorIndex]);
-    mesh.position.set(getGridX(x), 0, getGridZ(y));
-    scene.add(mesh);
-    const cell = { mesh, colorIndex, x, y };
-    mesh.userData.cell = cell;
-    grid[x][y] = cell;
-}
+    // helpers
+    const gridToWorldX = x => x * (TILE_SIZE + GAP) - (GRID_SIZE - 1) * (TILE_SIZE + GAP) / 2;
+    const gridToWorldZ = y => y * (TILE_SIZE + GAP) - (GRID_SIZE - 1) * (TILE_SIZE + GAP) / 2;
 
-function fillGridPreventInstantMatches(cb) {
-    // fill grid ensuring no immediate 3-in-row spawn
-    for (let x = 0; x < GRID_SIZE; x++) {
-        for (let y = 0; y < GRID_SIZE; y++) {
-            if (grid[x][y].mesh) continue;
-            let attempts = 0;
-            let colorIndex;
-            do {
-                colorIndex = Math.floor(Math.random() * colorSet.length);
-                attempts++;
-            } while (wouldCreateImmediateMatchOnSpawn(x, y, colorIndex) && attempts < 200);
-            createCell(x, y, colorIndex);
-        }
-    }
-    // small timeout to ensure meshes are in scene before callback
-    setTimeout(cb||(()=>{}), 10);
-}
+    function init() {
+        state = new GameState();
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x111111);
 
-function wouldCreateImmediateMatchOnSpawn(x, y, colorIndex) {
-    // horizontal
-    if (x >= 2) {
-        if (grid[x-1][y].colorIndex === colorIndex && grid[x-2][y].colorIndex === colorIndex) return true;
-    }
-    // vertical
-    if (y >= 2) {
-        if (grid[x][y-1].colorIndex === colorIndex && grid[x][y-2].colorIndex === colorIndex) return true;
-    }
-    return false;
-}
+        // perspective camera for the board
+        const aspect = window.innerWidth / window.innerHeight;
+        state.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+        state.camera.position.set(0, CAM_Y, 0.001);
+        state.camera.lookAt(0, 0, 0);
 
-// --- MATCHING ---
-function findMatches() {
-    const matched = new Set();
-    // horizontal
-    for (let y = 0; y < GRID_SIZE; y++) {
-        let runColor = null, runStart = 0, runLen = 0;
+        // renderer
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(state.renderer.domElement);
+
+        // lights
+        state.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+        const d = new THREE.DirectionalLight(0xffffff, 0.6);
+        d.position.set(5, 10, 5);
+        state.scene.add(d);
+
+        // orthographic camera for HUD
+        state.orthoCamera = new THREE.OrthographicCamera(-aspect * 8, aspect * 8, 8, -8, 0.1, 50);
+        state.orthoCamera.position.set(0, 0, 10);
+
+        // HUD as canvas texture mapped to a plane in front
+        state.hudCanvas = document.createElement('canvas');
+        state.hudCanvas.width = 512;
+        state.hudCanvas.height = 128;
+        state.hudTexture = new THREE.CanvasTexture(state.hudCanvas);
+        const hudMat = new THREE.MeshBasicMaterial({ map: state.hudTexture, transparent: true });
+        const hudGeo = new THREE.PlaneGeometry(12, 3);
+        state.hudMesh = new THREE.Mesh(hudGeo, hudMat);
+        state.hudMesh.position.set(0, GRID_SIZE * (TILE_SIZE + GAP) / 2 + 1.5, -1);
+        state.scene.add(state.hudMesh);
+
+        // floor plane for grounding
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({ color: 0x080808 }));
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = -0.4;
+        state.scene.add(plane);
+
+        state.clock = new THREE.Clock();
+        state.colorSets = COLORS_BY_PHASE;
+
+        // build grid
         for (let x = 0; x < GRID_SIZE; x++) {
-            const cell = grid[x][y];
-            if (!cell.mesh) { runColor = null; runLen = 0; continue; }
-            if (cell.colorIndex === runColor) { runLen++; }
-            else { if (runLen >= 3) for (let k = runStart; k < x; k++) matched.add(grid[k][y]); runColor = cell.colorIndex; runStart = x; runLen = 1; }
+            state.grid[x] = [];
+            for (let y = 0; y < GRID_SIZE; y++) {
+                state.grid[x][y] = null;
+            }
         }
-        if (runLen >= 3) for (let k = runStart; k < GRID_SIZE; k++) matched.add(grid[k][y]);
-    }
-    // vertical
-    for (let x = 0; x < GRID_SIZE; x++) {
-        let runColor = null, runStart = 0, runLen = 0;
-        for (let y = 0; y < GRID_SIZE; y++) {
-            const cell = grid[x][y];
-            if (!cell.mesh) { runColor = null; runLen = 0; continue; }
-            if (cell.colorIndex === runColor) { runLen++; }
-            else { if (runLen >= 3) for (let k = runStart; k < y; k++) matched.add(grid[x][k]); runColor = cell.colorIndex; runStart = y; runLen = 1; }
-        }
-        if (runLen >= 3) for (let k = runStart; k < GRID_SIZE; k++) matched.add(grid[x][k]);
-    }
-    return Array.from(matched);
-}
+        fillGridPreventInstantMatches();
 
-function removeMatches(matches, awardPoints = true) {
-    if (!matches || matches.length === 0) return Promise.resolve();
-    gameState = 'animating';
-    if (awardPoints) {
-        score += matches.length * 10;
-        updatePhase();
-        showMessage(`+${matches.length*10}`, 700);
+        // events
+        state.boundResize = () => onResize(state);
+        window.addEventListener('resize', state.boundResize);
+        state.renderer.domElement.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+
+        updateHUD();
+        animate();
     }
-    // animate scale down then remove
-    return new Promise(resolve => {
-        let finished = 0;
-        matches.forEach(cell => {
-            // guard
-            if (!cell.mesh) { finished++; if (finished === matches.length) resolve(); return; }
-            const m = cell.mesh;
-            const animDur = 200 + Math.random()*200;
-            const start = performance.now();
+
+    // create cube
+    function makeCube(color) {
+        return new THREE.Mesh(
+            new THREE.BoxGeometry(TILE_SIZE, 0.6, TILE_SIZE),
+            new THREE.MeshStandardMaterial({ color })
+        );
+    }
+
+    function createCell(x, y, colorIndex) {
+        const colorSet = state.colorSets[state.phase - 1];
+        const realColorIndex = colorIndex % colorSet.length;
+        const mesh = makeCube(colorSet[realColorIndex]);
+        mesh.position.set(gridToWorldX(x), 0, gridToWorldZ(y));
+        mesh.userData.cell = { x, y, colorIndex: realColorIndex };
+        state.scene.add(mesh);
+        state.grid[x][y] = mesh;
+    }
+
+    function fillGridPreventInstantMatches() {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                if (state.grid[x][y]) continue;
+                let attempts = 0, ci;
+                do {
+                    ci = Math.floor(Math.random() * state.colorSets[0].length);
+                    attempts++;
+                } while (wouldCreateImmediateMatchOnSpawn(x, y, ci) && attempts < 200);
+                createCell(x, y, ci);
+            }
+        }
+        // remove any pre-game matches (safety, edge case)
+        let matched;
+        while ((matched = findMatches()).length) {
+            for (const m of matched) {
+                const { x, y } = m.userData.cell;
+                state.scene.remove(m);
+                state.grid[x][y] = null;
+            }
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (state.grid[x][y] === null) {
+                        let attempts = 0, ci;
+                        do {
+                            ci = Math.floor(Math.random() * state.colorSets[0].length);
+                            attempts++;
+                        } while (wouldCreateImmediateMatchOnSpawn(x, y, ci) && attempts < 200);
+                        createCell(x, y, ci);
+                    }
+                }
+            }
+        }
+        // ensure at least one possible move
+        if (!hasPossibleMoves()) reshuffleGrid();
+    }
+
+    function wouldCreateImmediateMatchOnSpawn(x, y, colorIndex) {
+        // Defensive: Use only defined cells!
+        if (x >= 2) {
+            const a = state.grid[x - 1][y]?.userData.cell?.colorIndex;
+            const b = state.grid[x - 2][y]?.userData.cell?.colorIndex;
+            if (a === colorIndex && b === colorIndex) return true;
+        }
+        if (y >= 2) {
+            const a = state.grid[x][y - 1]?.userData.cell?.colorIndex;
+            const b = state.grid[x][y - 2]?.userData.cell?.colorIndex;
+            if (a === colorIndex && b === colorIndex) return true;
+        }
+        return false;
+    }
+
+    // MATCHING LOGIC
+    function findMatches() {
+        const matched = new Set();
+        // horizontal
+        for (let y = 0; y < GRID_SIZE; y++) {
+            let runColor = null, runStart = 0, runLen = 0;
+            for (let x = 0; x < GRID_SIZE; x++) {
+                const cell = state.grid[x][y];
+                if (!cell) {
+                    runColor = null; runLen = 0; continue;
+                }
+                const ci = cell.userData.cell.colorIndex;
+                if (ci === runColor) runLen++;
+                else {
+                    if (runLen >= 3) for (let k = runStart; k < x; k++) if (state.grid[k][y]) matched.add(state.grid[k][y]);
+                    runColor = ci; runStart = x; runLen = 1;
+                }
+            }
+            if (runLen >= 3) for (let k = runStart; k < GRID_SIZE; k++) if (state.grid[k][y]) matched.add(state.grid[k][y]);
+        }
+        // vertical
+        for (let x = 0; x < GRID_SIZE; x++) {
+            let runColor = null, runStart = 0, runLen = 0;
+            for (let y = 0; y < GRID_SIZE; y++) {
+                const cell = state.grid[x][y];
+                if (!cell) {
+                    runColor = null; runLen = 0; continue;
+                }
+                const ci = cell.userData.cell.colorIndex;
+                if (ci === runColor) runLen++;
+                else {
+                    if (runLen >= 3) for (let k = runStart; k < y; k++) if (state.grid[x][k]) matched.add(state.grid[x][k]);
+                    runColor = ci; runStart = y; runLen = 1;
+                }
+            }
+            if (runLen >= 3) for (let k = runStart; k < GRID_SIZE; k++) if (state.grid[x][k]) matched.add(state.grid[x][k]);
+        }
+        return Array.from(matched);
+    }
+
+    async function removeMatches(matches) {
+        if (!matches.length) return;
+        // award points
+        state.score += matches.length * 10;
+        updatePhase();
+        updateHUD();
+        // animate scale down and remove
+        await Promise.all(matches.map(m => new Promise(res => {
+            const start = performance.now(), dur = 220;
             (function tick(t) {
-                const p = Math.min(1, (t - start) / animDur);
+                const p = Math.min(1, (t - start) / dur);
                 const s = 1 - p;
-                m.scale.setScalar(s);
+                if (m.scale) m.scale.setScalar(Math.max(s, 0));
                 if (p < 1) requestAnimationFrame(tick);
                 else {
-                    // remove
-                    scene.remove(m);
-                    grid[cell.x][cell.y] = { mesh: null, colorIndex: -1, x: cell.x, y: cell.y };
-                    finished++; if (finished === matches.length) resolve();
+                    state.scene.remove(m);
+                    const x = m.userData.cell.x, y = m.userData.cell.y;
+                    state.grid[x][y] = null;
+                    res();
+                }
+            })(start);
+        })));
+        await dropAndRefill();
+        const next = findMatches();
+        if (next.length) await removeMatches(next);
+    }
+
+    function dropAndRefill() {
+        return new Promise(res => {
+            for (let x = 0; x < GRID_SIZE; x++) {
+                let write = 0;
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const c = state.grid[x][y];
+                    if (c) {
+                        if (y !== write) {
+                            state.grid[x][write] = c;
+                            c.userData.cell.y = write;
+                            c.position.set(gridToWorldX(x), 0, gridToWorldZ(write));
+                            state.grid[x][y] = null;
+                        }
+                        write++;
+                    }
+                }
+                for (let y = write; y < GRID_SIZE; y++) {
+                    let attempts = 0, ci;
+                    do {
+                        ci = Math.floor(Math.random() * state.colorSets[0].length);
+                        attempts++;
+                    } while (wouldCreateImmediateMatchOnSpawn(x, y, ci) && attempts < 200);
+                    createCell(x, y, ci);
+                }
+            }
+            setTimeout(res, 120);
+        });
+    }
+
+    function checkMatchAt(x, y) {
+        const cell = state.grid[x][y];
+        if (!cell) return false;
+        const c = cell.userData.cell.colorIndex;
+        let cnt = 1, i = x - 1;
+        while (i >= 0 && state.grid[i][y] && state.grid[i][y].userData.cell.colorIndex === c) { cnt++; i--; }
+        i = x + 1;
+        while (i < GRID_SIZE && state.grid[i][y] && state.grid[i][y].userData.cell.colorIndex === c) { cnt++; i++; }
+        if (cnt >= 3) return true;
+        cnt = 1; i = y - 1;
+        while (i >= 0 && state.grid[x][i] && state.grid[x][i].userData.cell.colorIndex === c) { cnt++; i--; }
+        i = y + 1;
+        while (i < GRID_SIZE && state.grid[x][i] && state.grid[x][i].userData.cell.colorIndex === c) { cnt++; i++; }
+        return cnt >= 3;
+    }
+
+    function canSwapMakeMatch(a, b) {
+        if (!a || !b) return false;
+        const ax = a.userData.cell.x, ay = a.userData.cell.y;
+        const bx = b.userData.cell.x, by = b.userData.cell.y;
+        const ca = a.userData.cell.colorIndex, cb = b.userData.cell.colorIndex;
+
+        // Temporarily swap colors for simulation
+        a.userData.cell.colorIndex = cb;
+        b.userData.cell.colorIndex = ca;
+        const ok = checkMatchAt(ax, ay) || checkMatchAt(bx, by);
+        a.userData.cell.colorIndex = ca;
+        b.userData.cell.colorIndex = cb;
+        return ok;
+    }
+
+    function hasPossibleMoves() {
+        for (let x = 0; x < GRID_SIZE; x++)
+            for (let y = 0; y < GRID_SIZE; y++) {
+                const c = state.grid[x][y];
+                if (!c) continue;
+                if (x < GRID_SIZE - 1 && canSwapMakeMatch(c, state.grid[x + 1][y])) return true;
+                if (y < GRID_SIZE - 1 && canSwapMakeMatch(c, state.grid[x][y + 1])) return true;
+            }
+        return false;
+    }
+
+    function reshuffleGrid() {
+        // gather all colorIndexes in a list
+        const colorPool = [];
+        for (let x = 0; x < GRID_SIZE; x++)
+            for (let y = 0; y < GRID_SIZE; y++)
+                colorPool.push(state.grid[x][y] ? state.grid[x][y].userData.cell.colorIndex : Math.floor(Math.random() * state.colorSets[0].length));
+        // randomize pool and assign back to cells, then fix visuals
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                const idx = Math.floor(Math.random() * colorPool.length);
+                const ci = colorPool.splice(idx, 1)[0];
+                if (state.grid[x][y]) {
+                    state.grid[x][y].userData.cell.colorIndex = ci;
+                    state.grid[x][y].material.color.setHex(state.colorSets[state.phase - 1][ci % state.colorSets[state.phase - 1].length]);
+                } else {
+                    createCell(x, y, ci);
+                }
+            }
+        }
+        // ensure no initial matches after shuffle
+        let matched;
+        while ((matched = findMatches()).length) {
+            for (const m of matched) {
+                const { x, y } = m.userData.cell;
+                state.scene.remove(m);
+                state.grid[x][y] = null;
+            }
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (state.grid[x][y] === null) {
+                        let attempts = 0, ci;
+                        do {
+                            ci = Math.floor(Math.random() * state.colorSets[0].length);
+                            attempts++;
+                        } while (wouldCreateImmediateMatchOnSpawn(x, y, ci) && attempts < 200);
+                        createCell(x, y, ci);
+                    }
+                }
+            }
+        }
+        if (!hasPossibleMoves()) setTimeout(reshuffleGrid, 50);
+    }
+
+    // SWAP with animation
+    function swapCells(a, b) {
+        if (state.gameOver) return;
+        const ax = a.userData.cell.x, ay = a.userData.cell.y;
+        const bx = b.userData.cell.x, by = b.userData.cell.y;
+
+        // Swap references in grid
+        state.grid[ax][ay] = b; state.grid[bx][by] = a;
+        a.userData.cell.x = bx; a.userData.cell.y = by;
+        b.userData.cell.x = ax; b.userData.cell.y = ay;
+
+        const pA = new THREE.Vector3(gridToWorldX(bx), 0, gridToWorldZ(by));
+        const pB = new THREE.Vector3(gridToWorldX(ax), 0, gridToWorldZ(ay));
+
+        // animate positions
+        const start = performance.now(), dur = 180;
+        return new Promise(res => {
+            (function tick(t) {
+                const p = Math.min(1, (t - start) / dur);
+                a.position.lerpVectors(a.position, pA, p);
+                b.position.lerpVectors(b.position, pB, p);
+                if (p < 1) {
+                    requestAnimationFrame(tick);
+                } else {
+                    // snap to pos
+                    a.position.copy(pA);
+                    b.position.copy(pB);
+                    // Check for matches
+                    const matches = findMatches();
+                    if (matches.length) {
+                        removeMatches(matches).then(() => {
+                            if (!hasPossibleMoves()) handleNoMoreMoves();
+                            res();
+                        });
+                    } else {
+                        // swap back with animation, increment mistakes
+                        setTimeout(() => {
+                            state.grid[ax][ay] = a; state.grid[bx][by] = b;
+                            a.userData.cell.x = ax; a.userData.cell.y = ay;
+                            b.userData.cell.x = bx; b.userData.cell.y = by;
+
+                            const s = performance.now(), d2 = 140;
+                            (function tick2(t2) {
+                                const q = Math.min(1, (t2 - s) / d2);
+                                a.position.lerpVectors(a.position, new THREE.Vector3(gridToWorldX(ax), 0, gridToWorldZ(ay)), q);
+                                b.position.lerpVectors(b.position, new THREE.Vector3(gridToWorldX(bx), 0, gridToWorldZ(by)), q);
+                                if (q < 1)
+                                    requestAnimationFrame(tick2);
+                                else {
+                                    a.position.set(gridToWorldX(ax), 0, gridToWorldZ(ay));
+                                    b.position.set(gridToWorldX(bx), 0, gridToWorldZ(by));
+                                    state.mistakes++;
+                                    updateHUD();
+                                    if (state.mistakes >= state.MAX_MISTAKES) handleNoMoreMoves();
+                                    res();
+                                }
+                            })(s);
+                        }, 120);
+                    }
                 }
             })(start);
         });
-    }).then(() => {
-        // after removal, drop and refill, then check for chains
-        dropAndRefill().then(() => {
-            const next = findMatches();
-            if (next.length > 0) return removeMatches(next, true);
-            // else finish
-            gameState = 'idle';
-            if (!hasPossibleMoves()) handleNoMoreMoves();
-        });
-    });
-}
+    }
 
-function dropAndRefill() {
-    return new Promise(resolve => {
-        // drop existing blocks down per column
-        for (let x = 0; x < GRID_SIZE; x++) {
-            let write = 0;
-            for (let y = 0; y < GRID_SIZE; y++) {
-                const cell = grid[x][y];
-                if (cell.mesh) {
-                    if (y !== write) {
-                        grid[x][write] = cell;
-                        cell.y = write;
-                        // animate position (instant for simplicity)
-                        cell.mesh.position.set(getGridX(x), 0, getGridZ(write));
-                        grid[x][y] = { mesh: null, colorIndex: -1, x, y };
+    // MOUSE / RAYCAST DRAG (visual following)
+    function onMouseDown(e) {
+        if (state.gameOver) return;
+        if (state.dragging) return;
+        const rect = state.renderer.domElement.getBoundingClientRect();
+        state.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        state.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        state.raycaster.setFromCamera(state.mouse, state.camera);
+
+        // Only hit cubes
+        const intersects = state.raycaster.intersectObjects(
+            state.scene.children.filter(o => o.userData && o.userData.cell), false
+        );
+        if (intersects.length) {
+            const obj = intersects.find(i => i.object.userData && i.object.userData.cell);
+            if (obj) {
+                state.dragging = obj.object;
+                state.dragging.position.y = 0.6; // visually lift
+                // compute offset between world intersection and mesh center
+                const hit = intersects[0].point;
+                state.dragOffset.copy(hit).sub(state.dragging.position);
+            }
+        }
+    }
+
+    function onMouseMove(e) {
+        if (state.gameOver) return;
+        if (!state.dragging) return;
+        const rect = state.renderer.domElement.getBoundingClientRect();
+        state.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        state.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        state.raycaster.setFromCamera(state.mouse, state.camera);
+        // intersect plane y=0
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const pos = new THREE.Vector3();
+        state.raycaster.ray.intersectPlane(plane, pos);
+        state.dragging.position.x = pos.x - state.dragOffset.x;
+        state.dragging.position.z = pos.z - state.dragOffset.z;
+    }
+
+    function onMouseUp(e) {
+        if (state.gameOver) return;
+        if (!state.dragging) return;
+        const rect = state.renderer.domElement.getBoundingClientRect();
+        state.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        state.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        state.raycaster.setFromCamera(state.mouse, state.camera);
+        // Only hit cubes
+        const intersects = state.raycaster.intersectObjects(
+            state.scene.children.filter(o => o.userData && o.userData.cell), false
+        );
+        let target = null;
+        if (intersects.length) {
+            const obj = intersects.find(i => i.object.userData && i.object.userData.cell);
+            if (obj) target = obj.object;
+        }
+        const source = state.dragging;
+        state.dragging.position.set(gridToWorldX(source.userData.cell.x), 0, gridToWorldZ(source.userData.cell.y));
+        state.dragging.position.y = 0;
+        if (target && target !== source) {
+            const dx = Math.abs(source.userData.cell.x - target.userData.cell.x);
+            const dy = Math.abs(source.userData.cell.y - target.userData.cell.y);
+            if (dx + dy === 1) { // attempt swap only for neighbors
+                swapCells(source, target);
+            }
+        }
+        state.dragging = null;
+        state.dragOffset.set(0, 0, 0);
+    }
+
+    // HUD drawing
+    function updateHUD() {
+        const ctx = state.hudCanvas.getContext('2d');
+        ctx.clearRect(0, 0, state.hudCanvas.width, state.hudCanvas.height);
+
+        if (!state.gameOver)
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        else
+            ctx.fillStyle = 'rgba(150,0,0,0.7)';
+        ctx.fillRect(0, 0, state.hudCanvas.width, state.hudCanvas.height);
+
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 32px monospace';
+        ctx.textBaseline = "top";
+        ctx.fillText(`Score:`, 24, 18);
+        ctx.font = '32px monospace';
+        ctx.fillText(`${state.score}`, 120, 18);
+
+        ctx.font = 'bold 28px monospace';
+        ctx.fillText(`Phase: ${state.phase}`, 220, 22);
+
+        ctx.font = 'bold 24px monospace';
+        ctx.fillText(`Mistakes:`, 24, 70);
+        ctx.fillText(`${state.mistakes} / ${state.MAX_MISTAKES}`, 180, 70);
+
+        if (state.gameOver) {
+            ctx.font = 'bold 48px monospace';
+            ctx.fillStyle = "#fff";
+            ctx.fillText('GAME OVER', 125, 90);
+        }
+        state.hudTexture.needsUpdate = true;
+    }
+
+    function updatePhase() {
+        let newP = 1;
+        for (let i = 0; i < COLORS_BY_PHASE.length; i++) {
+            if (state.score >= PHASE_THRESHOLDS[i]) newP = i + 1;
+        }
+        newP = Math.min(newP, COLORS_BY_PHASE.length);
+        if (newP !== state.phase) {
+            state.phase = newP;
+            // recolor everything
+            for (let x = 0; x < GRID_SIZE; x++)
+                for (let y = 0; y < GRID_SIZE; y++)
+                    if (state.grid[x][y]) {
+                        const ci = state.grid[x][y].userData.cell.colorIndex % state.colorSets[state.phase - 1].length;
+                        state.grid[x][y].userData.cell.colorIndex = ci;
+                        state.grid[x][y].material.color.setHex(state.colorSets[state.phase - 1][ci]);
                     }
-                    write++;
-                }
-            }
-            // fill remaining with new cubes
-            for (let y = write; y < GRID_SIZE; y++) {
-                let colorIndex;
-                let attempts = 0;
-                do {
-                    colorIndex = Math.floor(Math.random()*colorSet.length);
-                    attempts++;
-                } while (wouldCreateImmediateMatchOnSpawn(x,y,colorIndex) && attempts < 200);
-                createCell(x, y, colorIndex);
-            }
-        }
-        // tiny delay to let new meshes be present
-        setTimeout(resolve, 120);
-    });
-}
-
-// Check if swapping two adjacent cells would create a match
-function canSwapMakeMatch(c1, c2) {
-    if (!c1 || !c2) return false;
-    // swap colors
-    const a = c1.colorIndex, b = c2.colorIndex;
-    c1.colorIndex = b; c2.colorIndex = a;
-    const m = checkMatchAt(c1.x, c1.y) || checkMatchAt(c2.x, c2.y);
-    // swap back
-    c1.colorIndex = a; c2.colorIndex = b;
-    return m;
-}
-
-function checkMatchAt(x, y) {
-    const c = grid[x][y];
-    if (!c || !c.mesh) return false;
-    const color = c.colorIndex;
-    // horizontal count
-    let cnt = 1; let i = x-1; while (i>=0 && grid[i][y].mesh && grid[i][y].colorIndex===color) { cnt++; i--; }
-    i = x+1; while (i<GRID_SIZE && grid[i][y].mesh && grid[i][y].colorIndex===color) { cnt++; i++; }
-    if (cnt >= 3) return true;
-    // vertical
-    cnt = 1; i = y-1; while (i>=0 && grid[x][i].mesh && grid[x][i].colorIndex===color) { cnt++; i--; }
-    i = y+1; while (i<GRID_SIZE && grid[x][i].mesh && grid[x][i].colorIndex===color) { cnt++; i++; }
-    return cnt >= 3;
-}
-
-function hasPossibleMoves() {
-    for (let x = 0; x < GRID_SIZE; x++) {
-        for (let y = 0; y < GRID_SIZE; y++) {
-            const c = grid[x][y]; if (!c.mesh) continue;
-            if (x < GRID_SIZE-1) { if (canSwapMakeMatch(c, grid[x+1][y])) return true; }
-            if (y < GRID_SIZE-1) { if (canSwapMakeMatch(c, grid[x][y+1])) return true; }
         }
     }
-    return false;
-}
 
-function reshuffleGrid() {
-    // simple reshuffle: collect colors then randomly reassign, then refill meshes
-    const colors = [];
-    for (let x=0;x<GRID_SIZE;x++) for (let y=0;y<GRID_SIZE;y++) colors.push(grid[x][y].colorIndex);
-    // remove all meshes
-    for (let x=0;x<GRID_SIZE;x++) for (let y=0;y<GRID_SIZE;y++) if (grid[x][y].mesh) scene.remove(grid[x][y].mesh);
-    // shuffle array
-    for (let i = colors.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [colors[i], colors[j]] = [colors[j], colors[i]]; }
-    // reassign
-    let idx = 0;
-    for (let x=0;x<GRID_SIZE;x++) for (let y=0;y<GRID_SIZE;y++) createCell(x,y,colors[idx++]);
-    // ensure no instant matches; if still none moves, call again
-    if (!hasPossibleMoves()) setTimeout(reshuffleGrid, 50);
-}
+    function handleNoMoreMoves() {
+        if (state.gameOver) return;
+        state.gameOver = true;
+        updateHUD();
+        cancelAnimationFrame(loopId);
+        // visually lower cubes and block future moves
+        for (let x = 0; x < GRID_SIZE; x++)
+            for (let y = 0; y < GRID_SIZE; y++)
+                if (state.grid[x][y])
+                    state.grid[x][y].material.opacity = 0.5;
+    }
 
-// --- INPUT & INTERACTION ---
-function onPointerDown(e) {
-    if (gameState !== 'idle') return;
-    const rect = renderer.domElement.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(mouse, camera);
-    const meshes = [];
-    for (let x=0;x<GRID_SIZE;x++) for (let y=0;y<GRID_SIZE;y++) if (grid[x][y].mesh) meshes.push(grid[x][y].mesh);
-    const it = ray.intersectObjects(meshes);
-    if (!it || it.length === 0) return;
-    const mesh = it[0].object;
-    const cell = mesh.userData.cell;
-    if (!selected) {
-        // select this cell
-        selected = cell;
-        highlightCell(selected, true);
-    } else {
-        // if clicked same -> deselect
-        if (cell === selected) { highlightCell(selected, false); selected = null; return; }
-        // check adjacency
-        const dx = Math.abs(cell.x - selected.x), dy = Math.abs(cell.y - selected.y);
-        if (dx + dy === 1) {
-            // attempt swap
-            if (canSwapMakeMatch(selected, cell)) {
-                performSwap(selected, cell);
-            } else {
-                // animate quick invalid feedback (shake)
-                flashInvalid(selected, cell);
-            }
-            highlightCell(selected, false);
-            selected = null;
-        } else {
-            // select new
-            highlightCell(selected, false);
-            selected = cell;
-            highlightCell(selected, true);
+    function animate() {
+        if (!state) return;
+        loopId = requestAnimationFrame(animate);
+        updateHUD();
+        state.renderer.render(state.scene, state.camera);
+    }
+
+    function onResize(s) {
+        const aspect = window.innerWidth / window.innerHeight;
+        s.camera.aspect = aspect;
+        s.camera.updateProjectionMatrix();
+        s.renderer.setSize(window.innerWidth, window.innerHeight);
+        s.orthoCamera.left = -aspect * 8;
+        s.orthoCamera.right = aspect * 8;
+        s.orthoCamera.updateProjectionMatrix();
+    }
+
+    function disposeMesh(m) {
+        if (!m) return;
+        if (m.geometry) m.geometry.dispose();
+        if (m.material) {
+            if (m.material.map) m.material.map.dispose();
+            m.material.dispose();
         }
     }
-}
 
-function highlightCell(cell, on) {
-    if (!cell || !cell.mesh) return;
-    if (on) cell.mesh.scale.setScalar(1.15);
-    else cell.mesh.scale.setScalar(1);
-}
-
-function flashInvalid(a, b) {
-    const origA = a.mesh.position.clone();
-    const origB = b.mesh.position.clone();
-    const start = performance.now();
-    const dur = 200;
-    (function tick(t){
-        const p = (t-start)/dur; if (p>1) { a.mesh.position.copy(origA); b.mesh.position.copy(origB); return; }
-        const shake = Math.sin(p*10)*0.06;
-        a.mesh.position.x = origA.x + (a.x<b.x? -shake : shake);
-        b.mesh.position.x = origB.x + (a.x<b.x? shake : -shake);
-        requestAnimationFrame(tick);
-    })(start);
-}
-
-function performSwap(c1, c2) {
-    // swap colors & meshes in grid
-    gameState = 'animating';
-    // swap grid references
-    const x1 = c1.x, y1 = c1.y, x2 = c2.x, y2 = c2.y;
-    // swap entries
-    [grid[x1][y1], grid[x2][y2]] = [grid[x2][y2], grid[x1][y1]];
-    // update coords
-    grid[x1][y1].x = x1; grid[x1][y1].y = y1;
-    grid[x2][y2].x = x2; grid[x2][y2].y = y2;
-    // animate positions to new locations
-    const m1 = grid[x1][y1].mesh, m2 = grid[x2][y2].mesh;
-    const p1 = new THREE.Vector3(getGridX(x1), 0, getGridZ(y1));
-    const p2 = new THREE.Vector3(getGridX(x2), 0, getGridZ(y2));
-    const start = performance.now(); const dur = 180;
-    (function tick(t){
-        const p = Math.min(1, (t-start)/dur);
-        m1.position.lerpVectors(m1.position, p1, p);
-        m2.position.lerpVectors(m2.position, p2, p);
-        if (p < 1) requestAnimationFrame(tick);
-        else {
-            // after swap, find matches and process
-            const matches = findMatches();
-            if (matches.length > 0) {
-                removeMatches(matches, true);
-            } else {
-                // no match (shouldn't happen because we checked canSwapMakeMatch) -> swap back
-                setTimeout(() => {
-                    // swap back quietly
-                    [grid[x1][y1], grid[x2][y2]] = [grid[x2][y2], grid[x1][y1]];
-                    grid[x1][y1].x = x1; grid[x1][y1].y = y1; grid[x2][y2].x = x2; grid[x2][y2].y = y2;
-                    // animate back
-                    const s = performance.now(); const d2 = 120;
-                    (function tick2(t2){
-                        const q = Math.min(1, (t2-s)/d2);
-                        m1.position.lerpVectors(m1.position, new THREE.Vector3(getGridX(x2),0,getGridZ(y2)), 1-q);
-                        m2.position.lerpVectors(m2.position, new THREE.Vector3(getGridX(x1),0,getGridZ(y1)), 1-q);
-                        if (q < 1) requestAnimationFrame(tick2);
-                        else { gameState = 'idle'; }
-                    }) (s);
-                }, 100);
-            }
+    // EXPORT destroy
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        cancelAnimationFrame(loopId);
+        window.removeEventListener('resize', state.boundResize);
+        state.renderer.domElement.removeEventListener('mousedown', onMouseDown);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        if (state.renderer) {
+            if (state.renderer.domElement.parentNode) state.renderer.domElement.parentNode.removeChild(state.renderer.domElement);
+            try { state.renderer.forceContextLoss(); } catch (e) { }
+            state.renderer.dispose();
+            state.renderer = null;
         }
-    })(start);
-}
-
-// KEY HANDLERS
-function onKeyDown(e) {
-    if (gameState === 'game_over' && e.code === 'Enter') resetGame();
-    if (e.code === 'KeyR') resetGame();
-}
-
-function handleNoMoreMoves() {
-    gameState = 'game_over';
-    document.getElementById('end-message').textContent = 'NO MORE MOVES';
-    document.getElementById('end-score').textContent = `Final Score: ${score}`;
-    document.getElementById('gameover').style.display = 'flex';
-}
-
-// PHASE & HUD
-function updatePhase() {
-    let newPhase = 1;
-    for (let i = PHASE_THRESHOLDS.length-1; i>=0; i--) {
-        if (score >= PHASE_THRESHOLDS[i]) { newPhase = i+1; break; }
-    }
-    newPhase = Math.min(newPhase, COLORS_BY_PHASE.length);
-    if (newPhase !== phase) {
-        phase = newPhase;
-        colorSet = COLORS_BY_PHASE[Math.max(0, phase-1)];
-        // recolor all existing cubes to the new palette in a stable way
-        for (let x=0;x<GRID_SIZE;x++) for (let y=0;y<GRID_SIZE;y++) if (grid[x][y].mesh) {
-            const ci = grid[x][y].colorIndex % colorSet.length;
-            grid[x][y].mesh.material.color.setHex(colorSet[ci]);
+        if (state.scene) {
+            state.scene.traverse(o => { if (o.isMesh) disposeMesh(o); });
         }
-        showMessage(`Phase ${phase}!`, 900);
-    }
-    updateHUD();
-}
+        state = null;
+    };
 
-function updateHUD() {
-    document.getElementById('score').textContent = `Score: ${score}`;
-    document.getElementById('phase').textContent = `Phase: ${phase}`;
-    document.getElementById('lives').style.display = 'none';
-    document.getElementById('timer').style.display = 'none';
-}
-
-function showMessage(text, duration) {
-    const d = document.getElementById('message');
-    d.textContent = text; d.style.display = 'block';
-    if (duration) setTimeout(() => d.style.display = 'none', duration);
-}
-
-// RESIZE & ANIMATE
-function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    camera.left = -8*aspect; camera.right = 8*aspect; camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    updateHUD();
-    renderer.render(scene, camera);
-}
-
-// start
-init();
+    // start
+    init();
 })();

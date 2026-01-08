@@ -1,198 +1,199 @@
-(function() {
-// === Runner 3D (Side-scrolling, Refactored) ===
+(function () {
+    // ========== PRIVATE SCOPE ========== 
+    let state = null;
+    let loopId = null;
 
-// Settings
-const GRAVITY = -0.04;
-const JUMP_FORCE = 1.0;
-const PLAYER_HORIZONTAL_SPEED = 0.2;
-const TRACK_WIDTH = 8;
-const INITIAL_GAME_SPEED = 0.15;
-const SPEED_ACCEL = 0.0001;
-const OBSTACLE_SPAWN_RATE = 0.015;
-
-// Globals
-let scene, camera, renderer, clock;
-let player, ground;
-let obstacles = [];
-let keys = {};
-let score, gameSpeed;
-let gameState = 'playing';
-
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x87CEEB, 15, 50);
-    clock = new THREE.Clock();
-
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(-5, 5, 10);
-    camera.lookAt(5, 0, 0);
+    const GAME_CONST = {
+        GRAVITY: -0.04, JUMP_FORCE: 1.0, PLAYER_HORIZONTAL_SPEED: 0.18, TRACK_WIDTH: 8,
+        INITIAL_GAME_SPEED: 0.15, SPEED_ACCEL: 0.0001, OBSTACLE_SPAWN_RATE: 0.015,
+    };
     
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    document.getElementById('game-canvas-container').appendChild(renderer.domElement);
+    function GameState() {
+        this.scene = null; this.camera = null; this.renderer = null; this.clock = new THREE.Clock();
+        this.player = null;
+        this.obstacles = [];
+        this.keys = {};
+        this.score = 0; this.gameSpeed = 0;
+        this.gameState = 'playing'; // playing, game_over
 
-    const light = new THREE.AmbientLight(0xffffff, 0.6);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 20, 0);
-    dirLight.castShadow = true;
-    scene.add(light, dirLight);
-
-    const playerGeo = new THREE.BoxGeometry(0.8, 1.8, 0.8);
-    const playerMat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    player = new THREE.Mesh(playerGeo, playerMat);
-    player.castShadow = true;
-    player.userData = { velocity: new THREE.Vector3(), isOnGround: true };
-    scene.add(player);
-    
-    const groundGeo = new THREE.PlaneGeometry(50, TRACK_WIDTH + 2);
-    const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a5d23 });
-    ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
-
-    document.getElementById('info').innerHTML = `
-        <b>Side-Runner 3D</b><br>
-        <span>[A][D] : Move Left/Right</span><br>
-        <span>[SPACE] : Jump</span>
-    `;
-
-    resetGame();
-    initControls();
-    animate();
-}
-
-function resetGame() {
-    gameState = 'playing';
-    score = 0;
-    gameSpeed = INITIAL_GAME_SPEED;
-    
-    player.position.set(0, 0.5, 0);
-    player.userData.velocity.set(0,0,0);
-    player.userData.isOnGround = true;
-    
-    obstacles.forEach(obj => scene.remove(obj));
-    obstacles = [];
-    
-    document.getElementById('gameover').style.display = 'none';
-}
-
-function spawnObstacle() {
-    if (Math.random() > OBSTACLE_SPAWN_RATE) return;
-
-    const height = 1 + Math.random();
-    const geo = new THREE.BoxGeometry(1, height, 1);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-    const obstacle = new THREE.Mesh(geo, mat);
-    
-    obstacle.position.set(
-        20,
-        height / 2,
-        (Math.random() - 0.5) * TRACK_WIDTH
-    );
-    obstacle.castShadow = true;
-    obstacles.push(obstacle);
-    scene.add(obstacle);
-}
-
-function updatePlayer() {
-    // Horizontal (Z-axis) movement
-    let targetZ = player.position.z;
-    if (keys['KeyA'] || keys['ArrowLeft']) targetZ -= PLAYER_HORIZONTAL_SPEED;
-    if (keys['KeyD'] || keys['ArrowRight']) targetZ += PLAYER_HORIZONTAL_SPEED;
-    player.position.z = THREE.MathUtils.clamp(targetZ, -TRACK_WIDTH / 2, TRACK_WIDTH / 2);
-    
-    // Gravity & Jump
-    player.userData.velocity.y += GRAVITY;
-    player.position.y += player.userData.velocity.y;
-
-    if (player.position.y <= 0.5) {
-        player.position.y = 0.5;
-        player.userData.velocity.y = 0;
-        player.userData.isOnGround = true;
+        this.hudMesh = null; this.overlayMesh = null;
+        this.boundKeyDown = null; this.boundKeyUp = null; this.boundResize = null;
     }
 
-    if ((keys['KeyW'] || keys['Space']) && player.userData.isOnGround) {
-        player.userData.velocity.y = JUMP_FORCE * 0.15;
-        player.userData.isOnGround = false;
+    function init() {
+        state = new GameState();
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x87CEEB);
+        state.scene.fog = new THREE.Fog(0x87CEEB, 15, 50);
+
+        state.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        state.camera.position.set(-5, 5, 10);
+        state.camera.lookAt(5, 0, 0);
+        
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        state.renderer.shadowMap.enabled = true;
+        document.getElementById("game-canvas-container").appendChild(state.renderer.domElement);
+
+        addLights(state.scene);
+        
+        state.player = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), new THREE.MeshStandardMaterial({ color: 0x00ff00 }));
+        state.player.castShadow = true;
+        state.player.userData = { velocity: new THREE.Vector3(), isOnGround: true };
+        state.scene.add(state.player);
+        
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(50, GAME_CONST.TRACK_WIDTH + 2), new THREE.MeshStandardMaterial({ color: 0x4a5d23 }));
+        ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+        state.scene.add(ground);
+
+        state.boundKeyDown = e => { state.keys[e.code] = true; };
+        state.boundKeyUp = e => { state.keys[e.code] = false; };
+        state.boundResize = () => onResize(state);
+        window.addEventListener('keydown', state.boundKeyDown);
+        window.addEventListener('keyup', state.boundKeyUp);
+        window.addEventListener('resize', state.boundResize);
+
+        resetGame(state);
+        animate();
     }
-}
+    
+    function resetGame(state) {
+        state.gameState = 'playing';
+        state.score = 0;
+        state.gameSpeed = GAME_CONST.INITIAL_GAME_SPEED;
+        
+        state.player.position.set(0, 0.9, 0);
+        state.player.userData.velocity.set(0,0,0);
+        state.player.userData.isOnGround = true;
+        
+        state.obstacles.forEach(obj => state.scene.remove(obj));
+        state.obstacles = [];
+        
+        clearOverlay(state);
+        updateHUD(state);
+    }
+    
+    function animate() {
+        loopId = requestAnimationFrame(animate);
+        if(!state) return;
+        
+        if (state.gameState === 'playing') {
+            updatePlayer(state);
+            spawnObstacle(state);
+            updateWorld(state);
+            handleCollisions(state);
+            updateHUD(state);
+        } else if (state.keys['KeyR'] || state.keys['Enter']) {
+            resetGame(state);
+        }
+        
+        state.renderer.render(state.scene, state.camera);
+    }
 
-function updateWorld() {
-    gameSpeed += SPEED_ACCEL;
-    score = Math.floor(score + gameSpeed);
+    function addLights(scene) {
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 0);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+    }
 
-    for (let i = obstacles.length - 1; i >= 0; i--) {
-        const obstacle = obstacles[i];
-        obstacle.position.x -= gameSpeed;
+    function spawnObstacle(state) {
+        if (Math.random() > GAME_CONST.OBSTACLE_SPAWN_RATE || state.obstacles.length > 10) return;
+        const height = 1 + Math.random();
+        const obstacle = new THREE.Mesh(new THREE.BoxGeometry(1, height, 1), new THREE.MeshStandardMaterial({ color: 0xff0000 }));
+        obstacle.position.set(20, height / 2, (Math.random() - 0.5) * GAME_CONST.TRACK_WIDTH);
+        obstacle.castShadow = true;
+        state.obstacles.push(obstacle);
+        state.scene.add(obstacle);
+    }
 
-        if (obstacle.position.x < -20) {
-            scene.remove(obstacles.splice(i, 1)[0]);
+    function updatePlayer(state) {
+        let targetZ = state.player.position.z;
+        if (state.keys['KeyA'] || state.keys['ArrowLeft']) targetZ -= GAME_CONST.PLAYER_HORIZONTAL_SPEED;
+        if (state.keys['KeyD'] || state.keys['ArrowRight']) targetZ += GAME_CONST.PLAYER_HORIZONTAL_SPEED;
+        state.player.position.z = THREE.MathUtils.clamp(targetZ, -GAME_CONST.TRACK_WIDTH / 2, GAME_CONST.TRACK_WIDTH / 2);
+        
+        state.player.userData.velocity.y += GAME_CONST.GRAVITY;
+        state.player.position.y += state.player.userData.velocity.y;
+
+        if (state.player.position.y <= 0.9) {
+            state.player.position.y = 0.9;
+            state.player.userData.velocity.y = 0;
+            state.player.userData.isOnGround = true;
+        }
+
+        if ((state.keys['KeyW'] || state.keys['Space'] || state.keys['ArrowUp']) && state.player.userData.isOnGround) {
+            state.player.userData.velocity.y = GAME_CONST.JUMP_FORCE * 0.18;
+            state.player.userData.isOnGround = false;
         }
     }
-}
 
-function handleCollisions() {
-    const playerBox = new THREE.Box3().setFromObject(player);
-    for (const obstacle of obstacles) {
-        const obstacleBox = new THREE.Box3().setFromObject(obstacle);
-        if (playerBox.intersectsBox(obstacleBox)) {
-            handleEndGame();
-            return;
+    function updateWorld(state) {
+        state.gameSpeed += GAME_CONST.SPEED_ACCEL;
+        state.score += Math.round(state.gameSpeed * 5);
+        for (let i = state.obstacles.length - 1; i >= 0; i--) {
+            const obstacle = state.obstacles[i];
+            obstacle.position.x -= state.gameSpeed;
+            if (obstacle.position.x < -20) {
+                state.scene.remove(state.obstacles.splice(i, 1)[0]);
+            }
         }
     }
-}
 
-function handleEndGame() {
-    gameState = 'game_over';
-    const go = document.getElementById('gameover');
-    go.querySelector('#end-message').textContent = 'GAME OVER';
-    go.querySelector('#end-score').textContent = `Score: ${score}`;
-    go.querySelector('#restart-prompt').textContent = 'Press [R] to restart';
-    go.style.display = 'flex';
-}
+    function handleCollisions(state) {
+        const playerBox = new THREE.Box3().setFromObject(state.player);
+        for (const obstacle of state.obstacles) {
+            if (playerBox.intersectsBox(new THREE.Box3().setFromObject(obstacle))) {
+                handleEndGame(state);
+                return;
+            }
+        }
+    }
 
-function initControls() {
-    window.addEventListener('keydown', e => { keys[e.code] = true; });
-    window.addEventListener('keyup', e => { keys[e.code] = false; });
-    window.addEventListener('resize', onWindowResize);
-}
-
-function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-function updateHUD() {
-    document.getElementById('score').textContent = `Score: ${score}`;
-    document.getElementById('lives').style.display = 'none';
-    document.getElementById('timer').style.display = 'none';
-    document.getElementById('phase').style.display = 'none';
-    document.getElementById('pong-score').style.display = 'none';
-    document.getElementById('crosshair').style.display = 'none';
-    if(document.getElementById('race3d-ui')) document.getElementById('race3d-ui').style.display = 'none';
-    document.getElementById('message').style.display = 'none';
-    document.getElementById('countdown').style.display = 'none';
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-
-    if (gameState === 'playing') {
-        updatePlayer();
-        spawnObstacle();
-        updateWorld();
-        handleCollisions();
-        updateHUD();
-    } else if (keys['KeyR']) {
-        resetGame();
+    function handleEndGame(state) {
+        if(state.gameState === 'game_over') return;
+        state.gameState = 'game_over';
+        showOverlay(state, `GAME OVER\nScore: ${state.score}\n\n[ENTER] to restart`, true);
     }
     
-    renderer.render(scene, camera);
-}
+    function onResize(state) {
+        state.camera.aspect = window.innerWidth / window.innerHeight;
+        state.camera.updateProjectionMatrix();
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    function updateHUD(state) {
+        if(state.hudMesh) state.camera.remove(state.hudMesh);
+        state.hudMesh = createTextLabelMesh(`Score: ${state.score}`, { font: "24px Courier New", width: 400, height: 50, align: "left" });
+        state.hudMesh.position.set(-state.camera.aspect * 2.5, 2.3, -4);
+        state.camera.add(state.hudMesh);
+    }
+    
+    function showOverlay(state, text, bg) { clearOverlay(state); state.overlayMesh = createTextLabelMesh(text, { font:"32px Courier New", align:"center", width:500, height:250, ...(bg&&{bg:'rgba(0,0,0,0.7)'})}); state.overlayMesh.position.set(2,2,-5); state.overlayMesh.quaternion.copy(state.camera.quaternion); state.camera.add(state.overlayMesh); } function clearOverlay(state) { if(state.overlayMesh) { state.camera.remove(state.overlayMesh); disposeMesh(state.overlayMesh); state.overlayMesh = null; } } function disposeMesh(mesh) { if(mesh?.geometry) mesh.geometry.dispose(); if(mesh?.material) mesh.material.dispose(); } function createTextLabelMesh(text, opts) {
+        const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+        const font = opts.font || "24px Arial", w = opts.width || 512, h = opts.height || 128;
+        canvas.width = w; canvas.height = h; ctx.font = font;
+        if(opts.bg) { ctx.fillStyle = opts.bg; ctx.fillRect(0,0,w,h); }
+        ctx.fillStyle = opts.color || "#fff"; ctx.textAlign = opts.align || "center"; ctx.textBaseline = "middle";
+        const lines = text.split("\n"), lH = h/lines.length, x = opts.align === 'left'?20:w/2;
+        for(let i=0; i<lines.length; i++) ctx.fillText(lines[i], x, lH * (i + 0.5));
+        const tex = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w/100,h/100), new THREE.MeshBasicMaterial({map:tex,transparent:true}));
+        mesh.renderOrder=10; return mesh;
+    }
 
-init();
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        if (loopId) cancelAnimationFrame(loopId);
+        window.removeEventListener('keydown', state.boundKeyDown);
+        window.removeEventListener('keyup', state.boundKeyUp);
+        window.removeEventListener('resize', state.boundResize);
+        if(state.camera) { if(state.hudMesh) state.camera.remove(state.hudMesh); if(state.overlayMesh) state.camera.remove(state.overlayMesh); }
+        if (state.renderer) { const c=state.renderer.domElement; if(c?.parentNode) c.parentNode.removeChild(c); state.renderer.dispose(); }
+        if (state.scene) state.scene.traverse(o => { if (o.isMesh) disposeMesh(o); });
+        state = null;
+    };
+
+    init();
 })();

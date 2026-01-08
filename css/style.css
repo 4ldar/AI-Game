@@ -9,7 +9,6 @@ html, body {
     height: 100%;
     margin: 0;
     padding: 0;
-    overflow: auto;
 }
 
 body {
@@ -32,7 +31,6 @@ body {
     flex-direction: column;
     flex: 0 0 250px;
     border-right: 1px solid #333;
-    overflow-y: auto;
     box-sizing: border-box;
 }
 
@@ -49,7 +47,6 @@ body {
 
 .nav-menu {
     flex-grow: 1;
-    overflow-y: auto;
 }
 
 .nav-item {
@@ -73,10 +70,6 @@ body {
 .main-content {
     flex: 1;
     display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-direction: column;
-    overflow: auto;
     background: #000;
     height: 100vh;
     margin: 1rem;
@@ -92,8 +85,6 @@ body {
 .content-frame {
     flex-grow: 1;
     position: relative;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
     padding: 20px;
 }
 

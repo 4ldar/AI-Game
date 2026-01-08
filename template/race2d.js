@@ -1,218 +1,230 @@
-(function() {
-const ACCELERATION = 0.002;
-const BRAKE_FORCE = -0.003;
-const FRICTION = 0.98;
-const MAX_SPEED = 0.4;
-const TRACK_LENGTH = 150;
-const LANES = [-3, 0, 3];
+(function () {
+    // ========== PRIVATE SCOPE ========== 
+    let state = null;
+    let loopId = null;
 
-// Globals
-let scene, camera, renderer, clock;
-let player, npcs = [];
-let keys = {};
-let gameState = 'waiting'; // waiting, countdown, racing, finished
-let winner = null;
-
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x446688);
-    clock = new THREE.Clock();
-
-    const aspect = window.innerWidth / window.innerHeight;
-    camera = new THREE.OrthographicCamera(-10 * aspect, 10 * aspect, 10, -10, 0.1, 200);
-    camera.position.set(0, 5, 15);
-    camera.lookAt(0, 0, 0);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.getElementById('game-canvas-container').appendChild(renderer.domElement);
-
-    const light = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(light);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    dirLight.position.set(10, 10, 5);
-    scene.add(dirLight);
-
-    buildTrack();
+    const GAME_CONST = {
+        ACCELERATION: 0.002, BRAKE_FORCE: -0.003, FRICTION: 0.98, MAX_SPEED: 0.4,
+        TRACK_LENGTH: 150, LANES: [-3, 0, 3],
+    };
     
-    player = createCar(0x00ff00, LANES[1]);
-    npcs.push(createCar(0xff0000, LANES[0]));
-    npcs.push(createCar(0x00ffff, LANES[2]));
-    npcs[0].userData.ai = { baseSpeed: 0.25 + Math.random() * 0.05, reaction: 0.1 };
-    npcs[1].userData.ai = { baseSpeed: 0.28 + Math.random() * 0.05, reaction: 0.05 };
+    function GameState() {
+        this.scene = null; this.camera = null; this.renderer = null; this.clock = new THREE.Clock();
+        this.player = null; this.npcs = [];
+        this.keys = {};
+        this.gameState = 'waiting'; // waiting, countdown, racing, finished
+        this.winner = null;
+        this.countdown = 0;
 
-    document.getElementById('info').innerHTML = `
-        <b>Side-Scroller Race</b><br>
-        <span>[W]/[↑] : Accelerate</span><br>
-        <span>[S]/[↓] : Brake</span>
-    `;
-
-    resetGame();
-
-    window.addEventListener('keydown', e => { keys[e.code] = true; });
-    window.addEventListener('keyup', e => { keys[e.code] = false; });
-    window.addEventListener('resize', onWindowResize);
-    
-    animate();
-}
-
-function createCar(color, z) {
-    const carBody = new THREE.Mesh(new THREE.BoxGeometry(2, 0.6, 1), new THREE.MeshStandardMaterial({ color }));
-    const carTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
-    carTop.position.y = 0.5;
-    const car = new THREE.Group();
-    car.add(carBody, carTop);
-    car.position.z = z;
-    car.userData = { velocity: 0 };
-    scene.add(car);
-    return car;
-}
-
-function buildTrack() {
-    const groundMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
-    const ground = new THREE.Mesh(new THREE.BoxGeometry(TRACK_LENGTH + 40, 1, 12), groundMat);
-    ground.position.y = -0.5;
-    ground.position.x = TRACK_LENGTH / 2;
-    scene.add(ground);
-    
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
-    for(let i=0; i < TRACK_LENGTH / 4; i++) {
-        const points = [
-            new THREE.Vector3(i*4 - 10, 0, LANES[0] - 1.5),
-            new THREE.Vector3(i*4 - 8, 0, LANES[0] - 1.5),
-            new THREE.Vector3(i*4 - 10, 0, LANES[1] - 1.5),
-            new THREE.Vector3(i*4 - 8, 0, LANES[1] - 1.5),
-        ];
-        const geo = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.LineSegments(geo, lineMat);
-        scene.add(line);
+        this.hudMesh = null; this.overlayMesh = null;
+        this.boundKeyDown = null; this.boundKeyUp = null; this.boundResize = null;
     }
-    
-    const finishGeo = new THREE.BoxGeometry(0.2, 0.1, 10);
-    const finishMat = new THREE.MeshStandardMaterial({color: 0xffffff});
-    const finishLine = new THREE.Mesh(finishGeo, finishMat);
-    finishLine.position.set(TRACK_LENGTH, 0, 0);
-    scene.add(finishLine);
-}
 
-function resetGame() {
-    gameState = 'countdown';
-    winner = null;
-    
-    player.position.x = 0;
-    player.userData.velocity = 0;
-    npcs.forEach(npc => {
-        npc.position.x = 0;
-        npc.userData.velocity = 0;
-    });
-    
-    document.getElementById('gameover').style.display = 'none';
-    
-    let count = 3;
-    const countdownElem = document.getElementById('countdown');
-    countdownElem.style.display = 'block';
-    countdownElem.textContent = count;
-    
-    const countdownInterval = setInterval(() => {
-        count--;
-        if (count > 0) {
-            countdownElem.textContent = count;
-        } else {
-            countdownElem.textContent = 'GO!';
-            setTimeout(() => {
-                countdownElem.style.display = 'none';
-                gameState = 'racing';
-            }, 500);
-            clearInterval(countdownInterval);
-        }
-    }, 1000);
-}
+    function init() {
+        state = new GameState();
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x446688);
 
-function updatePlayer() {
-    if (keys['KeyW'] || keys['ArrowUp']) {
-        player.userData.velocity += ACCELERATION;
-    } else if (keys['KeyS'] || keys['ArrowDown']) {
-        player.userData.velocity += BRAKE_FORCE;
-    }
-    
-    player.userData.velocity *= FRICTION;
-    player.userData.velocity = THREE.MathUtils.clamp(player.userData.velocity, 0, MAX_SPEED);
-    player.position.x += player.userData.velocity;
-}
+        const aspect = window.innerWidth / window.innerHeight;
+        state.camera = new THREE.OrthographicCamera(-10*aspect, 10*aspect, 10, -10, 0.1, 200);
+        state.camera.position.set(0, 5, 15);
+        state.camera.lookAt(0, 0, 0);
 
-function updateNPCs() {
-    npcs.forEach(npc => {
-        // Simple AI: try to maintain base speed with some randomness
-        if (npc.userData.velocity < npc.userData.ai.baseSpeed) {
-            npc.userData.velocity += ACCELERATION * (0.8 + Math.random() * 0.4);
-        }
-        if(Math.random() < npc.userData.ai.reaction) {
-             npc.userData.velocity *= (0.95 + Math.random() * 0.1);
-        }
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById("game-canvas-container").appendChild(state.renderer.domElement);
         
-        npc.userData.velocity *= FRICTION;
-        npc.userData.velocity = THREE.MathUtils.clamp(npc.userData.velocity, 0, MAX_SPEED * 0.9);
-        npc.position.x += npc.userData.velocity;
-    });
-}
+        state.scene.add(new THREE.AmbientLight(0xffffff, 0.8), new THREE.DirectionalLight(0xffffff, 0.5));
+        buildTrack(state.scene);
+        
+        state.player = createCar(0x00ff00, GAME_CONST.LANES[1]);
+        state.npcs.push(createCar(0xff0000, GAME_CONST.LANES[0]));
+        state.npcs.push(createCar(0x00ffff, GAME_CONST.LANES[2]));
+        state.npcs[0].userData.ai = { baseSpeed: 0.25 + Math.random()*0.05, reaction: 0.1 };
+        state.npcs[1].userData.ai = { baseSpeed: 0.28 + Math.random()*0.05, reaction: 0.05 };
+        state.scene.add(state.player, ...state.npcs);
 
-function checkWinCondition() {
-    if (player.position.x >= TRACK_LENGTH && !winner) winner = 'Player';
-    if (npcs[0].position.x >= TRACK_LENGTH && !winner) winner = 'Red Car';
-    if (npcs[1].position.x >= TRACK_LENGTH && !winner) winner = 'Blue Car';
+        state.boundKeyDown = e => { state.keys[e.code] = true; };
+        state.boundKeyUp = e => { state.keys[e.code] = false; };
+        state.boundResize = () => onResize(state);
+        window.addEventListener('keydown', state.boundKeyDown);
+        window.addEventListener('keyup', state.boundKeyUp);
+        window.addEventListener('resize', state.boundResize);
 
-    if (winner) {
-        handleEndGame();
-    }
-}
-
-function handleEndGame() {
-    gameState = 'finished';
-    const go = document.getElementById('gameover');
-    go.querySelector('#end-message').textContent = `${winner} Wins!`;
-    go.querySelector('#restart-prompt').textContent = 'Press [ENTER] to race again';
-    go.style.display = 'flex';
-}
-
-function updateCamera() {
-    camera.position.x += (player.position.x - camera.position.x) * 0.1;
-}
-
-function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    camera.left = -10 * aspect;
-    camera.right = 10 * aspect;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-function updateHUD() {
-    const speedKmh = (player.userData.velocity / MAX_SPEED * 200).toFixed(0);
-    document.getElementById('score').textContent = `Speed: ${speedKmh} km/h`;
-    document.getElementById('lives').style.display = 'none';
-    document.getElementById('timer').style.display = 'none';
-    document.getElementById('phase').style.display = 'none';
-    document.getElementById('pong-score').style.display = 'none';
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    
-    switch(gameState) {
-        case 'racing':
-            updatePlayer();
-            updateNPCs();
-            checkWinCondition();
-            updateCamera();
-            updateHUD();
-            break;
-        case 'finished':
-            if (keys['Enter']) resetGame();
-            break;
+        resetGame(state);
+        animate();
     }
     
-    renderer.render(scene, camera);
-}
+    function resetGame(state) {
+        state.gameState = 'countdown';
+        state.winner = null;
+        state.countdown = 3.99;
+        
+        state.player.position.x = 0; state.player.userData.velocity = 0;
+        state.npcs.forEach(npc => { npc.position.x = 0; npc.userData.velocity = 0; });
+        
+        clearOverlay(state);
+        updateHUD(state);
+    }
+    
+    function createCar(color, z) {
+        const car = new THREE.Group();
+        car.add(new THREE.Mesh(new THREE.BoxGeometry(2, 0.6, 1), new THREE.MeshStandardMaterial({ color })));
+        const top = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        top.position.y = 0.5; car.add(top);
+        car.position.z = z; car.userData = { velocity: 0 };
+        return car;
+    }
 
-init();
+    function buildTrack(scene) {
+        const ground = new THREE.Mesh(new THREE.BoxGeometry(GAME_CONST.TRACK_LENGTH + 40, 1, 12), new THREE.MeshStandardMaterial({ color: 0x555555 }));
+        ground.position.set(GAME_CONST.TRACK_LENGTH / 2, -0.5, 0);
+        scene.add(ground);
+        
+        const finishLine = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 10), new THREE.MeshStandardMaterial({color: 0xffffff}));
+        finishLine.position.set(GAME_CONST.TRACK_LENGTH, 0.51, 0);
+        scene.add(finishLine);
+    }
+    
+    function animate() {
+        loopId = requestAnimationFrame(animate);
+        if(!state) return;
+        
+        const deltaTime = state.clock.getDelta();
+        
+        switch(state.gameState) {
+            case 'countdown':
+                state.countdown -= deltaTime;
+                showOverlay(state, `${Math.ceil(state.countdown)}`, false);
+                if (state.countdown <= 0.99) {
+                    showOverlay(state, 'GO!', true, 800);
+                    state.gameState = 'racing';
+                }
+                break;
+            case 'racing':
+                updatePlayer(state);
+                updateNPCs(state);
+                checkWinCondition(state);
+                updateHUD(state);
+                break;
+            case 'finished':
+                if (state.keys['Enter']) resetGame(state);
+                break;
+        }
+        updateCamera(state);
+        state.renderer.render(state.scene, state.camera);
+    }
+
+    function updatePlayer(state) {
+        if (state.keys['KeyW'] || state.keys['ArrowUp']) state.player.userData.velocity += GAME_CONST.ACCELERATION;
+        else if (state.keys['KeyS'] || state.keys['ArrowDown']) state.player.userData.velocity += GAME_CONST.BRAKE_FORCE;
+        
+        state.player.userData.velocity *= GAME_CONST.FRICTION;
+        state.player.userData.velocity = THREE.MathUtils.clamp(state.player.userData.velocity, 0, GAME_CONST.MAX_SPEED);
+        state.player.position.x += state.player.userData.velocity;
+    }
+
+    function updateNPCs(state) {
+        state.npcs.forEach(npc => {
+            if (npc.userData.velocity < npc.userData.ai.baseSpeed) npc.userData.velocity += GAME_CONST.ACCELERATION * (0.8 + Math.random() * 0.4);
+            if(Math.random() < npc.userData.ai.reaction) npc.userData.velocity *= (0.95 + Math.random() * 0.1);
+            npc.userData.velocity = THREE.MathUtils.clamp(npc.userData.velocity, 0, GAME_CONST.MAX_SPEED * 0.95) * GAME_CONST.FRICTION;
+            npc.position.x += npc.userData.velocity;
+        });
+    }
+
+    function checkWinCondition(state) {
+        if (state.winner) return;
+        if (state.player.position.x >= GAME_CONST.TRACK_LENGTH) state.winner = 'You';
+        if (state.npcs[0].position.x >= GAME_CONST.TRACK_LENGTH) state.winner = 'Red Car';
+        if (state.npcs[1].position.x >= GAME_CONST.TRACK_LENGTH) state.winner = 'Blue Car';
+        if (state.winner) handleEndGame(state);
+    }
+
+    function handleEndGame(state) {
+        state.gameState = 'finished';
+        showOverlay(state, `${state.winner} Wins!\n\n[ENTER] to restart`, true);
+    }
+
+    function updateCamera(state) {
+        state.camera.position.x += (state.player.position.x - state.camera.position.x) * 0.1;
+    }
+    
+    function onResize(state) {
+        const aspect = window.innerWidth / window.innerHeight;
+        state.camera.left = -10 * aspect; state.camera.right = 10 * aspect;
+        state.camera.updateProjectionMatrix();
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    function updateHUD(state) {
+        if(state.hudMesh) { state.camera.remove(state.hudMesh); disposeMesh(state.hudMesh); }
+        const speedKmh = (state.player.userData.velocity / GAME_CONST.MAX_SPEED * 200).toFixed(0);
+        const text = `Speed: ${speedKmh} km/h`;
+        state.hudMesh = createTextLabelMesh(text, { font: "24px Courier New", width: 400, height: 50, align: "left" });
+        
+        const aspect = window.innerWidth / window.innerHeight;
+        state.hudMesh.position.set(-10 * aspect + 2, 9, -1);
+        state.camera.add(state.hudMesh);
+    }
+
+    function showOverlay(state, text, hasBg = true, autoClear = 0) {
+        clearOverlay(state);
+        const opts = { font: "80px Impact", width: 800, height: 200 };
+        if(hasBg) opts.bg = 'rgba(0,0,0,0.7)';
+        state.overlayMesh = createTextLabelMesh(text, opts);
+        state.overlayMesh.position.set(0, 2, -1);
+        state.camera.add(state.overlayMesh);
+        if(autoClear > 0) setTimeout(() => clearOverlay(state), autoClear);
+    }
+
+    function clearOverlay(state) {
+        if (state.overlayMesh) {
+            state.camera.remove(state.overlayMesh);
+            disposeMesh(state.overlayMesh);
+            state.overlayMesh = null;
+        }
+    }
+
+    function disposeMesh(mesh) { if(mesh?.geometry) mesh.geometry.dispose(); if(mesh?.material) mesh.material.dispose(); }
+    function createTextLabelMesh(text, opts) {
+        const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+        const font = opts.font || "24px Arial", width = opts.width || 512, height = opts.height || 128;
+        canvas.width = width; canvas.height = height;
+        ctx.font = font;
+        if (opts.bg) { ctx.fillStyle = opts.bg; ctx.fillRect(0, 0, width, height); }
+        ctx.fillStyle = opts.color || "#fff";
+        ctx.textAlign = opts.align || "center";
+        ctx.textBaseline = "middle";
+        const lines = text.split("\n"), lineH = height / lines.length;
+        for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], width / 2, lineH * (i + 0.5));
+        const tex = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(width/50, height/50),
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false })
+        );
+        mesh.renderOrder = 10;
+        return mesh;
+    }
+
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        if (loopId) cancelAnimationFrame(loopId);
+        window.removeEventListener('keydown', state.boundKeyDown);
+        window.removeEventListener('keyup', state.boundKeyUp);
+        window.removeEventListener('resize', state.boundResize);
+        if(state.camera) {
+            if(state.hudMesh) state.camera.remove(state.hudMesh);
+            if(state.overlayMesh) state.camera.remove(state.overlayMesh);
+        }
+        if (state.renderer) {
+            const canvas = state.renderer.domElement;
+            if (canvas?.parentNode) canvas.parentNode.removeChild(canvas);
+            state.renderer.dispose();
+        }
+        if (state.scene) state.scene.traverse(obj => { if (obj.isMesh) disposeMesh(obj); });
+        state = null;
+    };
+
+    init();
 })();

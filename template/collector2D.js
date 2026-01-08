@@ -1,242 +1,315 @@
-(function() {
-// === Collector 2D Game (Refactored) ===
+(function () {
+    // ========== PRIVATE SCOPE ========== 
+    let state = null;
+    let loopId = null;
 
-// Settings
-const WORLD_W = 22;
-const WORLD_H = 16;
-const PLAYER_SPEED = 0.2;
-const ITEM_COUNT = 15;
-const TIME_LIMIT = 45; // seconds
+    const GAME_CONST = {
+        WORLD_W: 22,
+        WORLD_H: 16,
+        PLAYER_SPEED: 0.15,
+        ITEM_COUNT: 15,
+        TIME_LIMIT: 45, // seconds
+    };
 
-// Globals
-let scene, camera, renderer, clock;
-let player, items = [];
-let keys = {};
-let score, timeLeft;
-let isGameOver = false;
+    function GameState() {
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.clock = new THREE.Clock();
+        this.player = null;
+        this.items = [];
+        this.walls = [];
+        this.keys = {};
+        this.score = 0;
+        this.timeLeft = 0;
+        this.isGameOver = false;
 
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x2d1b4e);
-    clock = new THREE.Clock();
+        this.hudMesh = null;
+        this.overlayMesh = null;
 
-    const gameCanvasContainer = document.getElementById('game-canvas-container');
-    const aspectRatio = gameCanvasContainer.offsetWidth / gameCanvasContainer.offsetHeight;
+        // cleanup list
+        this.boundKeydown = null;
+        this.boundKeyup = null;
+        this.boundResize = null;
+    }
 
-    camera = new THREE.OrthographicCamera(
-        -WORLD_W / 2 * aspectRatio, WORLD_W / 2 * aspectRatio,
-        WORLD_H / 2, -WORLD_H / 2,
-        0.1, 100
-    );
-    camera.position.z = 10;
+    function init() {
+        state = new GameState();
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(gameCanvasContainer.offsetWidth, gameCanvasContainer.offsetHeight);
-    gameCanvasContainer.appendChild(renderer.domElement);
+        // Scene
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x2d1b4e);
 
-    const light = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(light);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    dirLight.position.set(5, 10, 5);
-    scene.add(dirLight);
-
-    const playerGeo = new THREE.CircleGeometry(0.5, 32);
-    const playerMat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    player = new THREE.Mesh(playerGeo, playerMat);
-    scene.add(player);
-    
-    buildWalls();
-    resetGame();
-
-    // Set up info text
-    const infoDiv = document.getElementById('info');
-    infoDiv.innerHTML = `
-        <b>Collector 2D</b><br>
-        <span>[WASD] / [ARROWS] : Move</span><br>
-        <span>Collect all items before time runs out!</span>
-    `;
-
-    window.addEventListener('keydown', e => { keys[e.code] = true; });
-    window.addEventListener('keyup', e => { keys[e.code] = false; });
-    window.addEventListener('resize', onWindowResize);
-    
-    animate();
-}
-
-function resetGame() {
-    isGameOver = false;
-    score = 0;
-    timeLeft = TIME_LIMIT;
-
-    player.position.set(0, 0, 0);
-
-    items.forEach(i => scene.remove(i));
-    items = [];
-    spawnItems(ITEM_COUNT);
-    
-    updateHUD();
-    document.getElementById('gameover').style.display = 'none';
-
-    // Make sure other non-relevant UIs are hidden
-    document.getElementById('crosshair').style.display = 'none';
-    document.getElementById('message').style.display = 'none';
-    document.getElementById('countdown').style.display = 'none';
-    document.getElementById('wave-announcement').style.display = 'none';
-    document.getElementById('pong-score').style.display = 'none';
-    if(document.getElementById('race3d-ui')) document.getElementById('race3d-ui').style.display = 'none';
-    document.getElementById('tower-panel').style.display = 'none';
-    document.getElementById('start-wave-btn').style.display = 'none';
-}
-
-function spawnItems(count) {
-    const geo = new THREE.IcosahedronGeometry(0.4, 0);
-    for (let i = 0; i < count; i++) {
-        const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.8, 0.6) });
-        const item = new THREE.Mesh(geo, mat);
-        
-        item.position.set(
-            (Math.random() - 0.5) * (WORLD_W - 2),
-            (Math.random() - 0.5) * (WORLD_H - 2),
-            0
+        // Camera
+        state.camera = new THREE.OrthographicCamera(
+            -GAME_CONST.WORLD_W / 2, GAME_CONST.WORLD_W / 2,
+            GAME_CONST.WORLD_H / 2, -GAME_CONST.WORLD_H / 2,
+            0.1, 100
         );
-        items.push(item);
-        scene.add(item);
+        state.camera.position.z = 10;
+
+        // Renderer
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById("game-canvas-container").appendChild(state.renderer.domElement);
+
+        // Lights
+        state.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        dirLight.position.set(5, 10, 5);
+        state.scene.add(dirLight);
+
+        // Game Objects
+        state.player = new THREE.Mesh(
+            new THREE.CircleGeometry(0.5, 32),
+            new THREE.MeshStandardMaterial({ color: 0x00ff00 })
+        );
+        state.scene.add(state.player);
+        
+        buildWalls(state);
+        
+        // Event Listeners
+        state.boundKeydown = e => { state.keys[e.code] = true; };
+        state.boundKeyup = e => { state.keys[e.code] = false; };
+        state.boundResize = () => onResize(state);
+
+        window.addEventListener('keydown', state.boundKeydown);
+        window.addEventListener('keyup', state.boundKeyup);
+        window.addEventListener('resize', state.boundResize);
+        
+        resetGame(state);
+        animate();
     }
-}
-
-function updatePlayer() {
-    if (keys['KeyW'] || keys['ArrowUp']) player.position.y += PLAYER_SPEED;
-    if (keys['KeyS'] || keys['ArrowDown']) player.position.y -= PLAYER_SPEED;
-    if (keys['KeyA'] || keys['ArrowLeft']) player.position.x -= PLAYER_SPEED;
-    if (keys['KeyD'] || keys['ArrowRight']) player.position.x += PLAYER_SPEED;
     
-    // Clamp to world boundaries
-    const halfW = WORLD_W / 2 - 0.5;
-    const halfH = WORLD_H / 2 - 0.5;
-    player.position.x = THREE.MathUtils.clamp(player.position.x, -halfW, halfW);
-    player.position.y = THREE.MathUtils.clamp(player.position.y, -halfH, halfH);
-}
+    function resetGame(state) {
+        state.isGameOver = false;
+        state.score = 0;
+        state.timeLeft = GAME_CONST.TIME_LIMIT;
+        
+        if (state.overlayMesh) clearOverlay(state);
 
-function updateGame(deltaTime) {
-    timeLeft -= deltaTime;
-    if (timeLeft <= 0) {
-        timeLeft = 0;
-        handleEndGame(false);
+        state.player.position.set(0, 0, 0);
+
+        state.items.forEach(i => state.scene.remove(i));
+        state.items = [];
+        spawnItems(state, GAME_CONST.ITEM_COUNT);
+        
+        updateHUD(state);
     }
     
-    items.forEach(item => {
-        item.rotation.x += 0.5 * deltaTime;
-        item.rotation.y += 0.5 * deltaTime;
-    });
-}
+    function animate() {
+        loopId = requestAnimationFrame(animate);
+        if (!state) return;
 
-function handleCollisions() {
-    for (let i = items.length - 1; i >= 0; i--) {
-        if (player.position.distanceTo(items[i].position) < 0.8) {
-            scene.remove(items[i]);
-            items.splice(i, 1);
-            score++;
-            if (score >= ITEM_COUNT) {
-                handleEndGame(true);
+        const deltaTime = state.clock.getDelta();
+
+        if (state.isGameOver) {
+            if(state.keys['Enter']) resetGame(state);
+        } else {
+            updatePlayer(state);
+            updateGame(state, deltaTime);
+            handleCollisions(state);
+            updateHUD(state);
+        }
+        state.renderer.render(state.scene, state.camera);
+    }
+    
+    function spawnItems(state, count) {
+        const geo = new THREE.IcosahedronGeometry(0.4, 0);
+        for (let i = 0; i < count; i++) {
+            const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.8, 0.6) });
+            const item = new THREE.Mesh(geo, mat);
+            item.position.set(
+                (Math.random() - 0.5) * (GAME_CONST.WORLD_W - 2),
+                (Math.random() - 0.5) * (GAME_CONST.WORLD_H - 2),
+                0
+            );
+            state.items.push(item);
+            state.scene.add(item);
+        }
+    }
+
+    function updatePlayer(state) {
+        if (state.keys['KeyW'] || state.keys['ArrowUp']) state.player.position.y += GAME_CONST.PLAYER_SPEED;
+        if (state.keys['KeyS'] || state.keys['ArrowDown']) state.player.position.y -= GAME_CONST.PLAYER_SPEED;
+        if (state.keys['KeyA'] || state.keys['ArrowLeft']) state.player.position.x -= GAME_CONST.PLAYER_SPEED;
+        if (state.keys['KeyD'] || state.keys['ArrowRight']) state.player.position.x += GAME_CONST.PLAYER_SPEED;
+        
+        const halfW = GAME_CONST.WORLD_W / 2 - 0.5;
+        const halfH = GAME_CONST.WORLD_H / 2 - 0.5;
+        state.player.position.x = THREE.MathUtils.clamp(state.player.position.x, -halfW, halfW);
+        state.player.position.y = THREE.MathUtils.clamp(state.player.position.y, -halfH, halfH);
+    }
+    
+    function updateGame(state, deltaTime) {
+        if (state.isGameOver) return;
+        
+        state.timeLeft -= deltaTime;
+        if (state.timeLeft <= 0) {
+            state.timeLeft = 0;
+            handleEndGame(state, false);
+        }
+        
+        state.items.forEach(item => {
+            item.rotation.x += 0.5 * deltaTime;
+            item.rotation.y += 0.5 * deltaTime;
+        });
+    }
+
+    function handleCollisions(state) {
+        for (let i = state.items.length - 1; i >= 0; i--) {
+            if (state.player.position.distanceTo(state.items[i].position) < 0.8) {
+                state.scene.remove(state.items[i]);
+                disposeMesh(state.items[i]);
+                state.items.splice(i, 1);
+                state.score++;
+                if (state.score >= GAME_CONST.ITEM_COUNT) {
+                    handleEndGame(state, true);
+                }
             }
         }
     }
-}
 
-function handleEndGame(isWin) {
-    if (isGameOver) return;
-    isGameOver = true;
-    
-    const go = document.getElementById('gameover');
-    const timeTaken = TIME_LIMIT - timeLeft;
-    
-    document.getElementById('end-message').textContent = isWin ? "YOU WIN!" : "TIME'S UP!";
-    document.getElementById('end-score').textContent = 'You collected ' + score + ' / ' + ITEM_COUNT + ' items';
-    if(isWin) {
-         document.getElementById('end-score').textContent += ' in ' + timeTaken.toFixed(1) + ' seconds.';
+    function handleEndGame(state, isWin) {
+        if (state.isGameOver) return;
+        state.isGameOver = true;
+        
+        const timeTaken = GAME_CONST.TIME_LIMIT - state.timeLeft;
+        const endMsg1 = isWin ? "YOU WIN!" : "TIME'S UP!";
+        let endMsg2 = `You collected ${state.score}/${GAME_CONST.ITEM_COUNT} items`;
+        if(isWin) endMsg2 += `\n in ${timeTaken.toFixed(1)} seconds.`;
+        
+        const fullMsg = `${endMsg1}\n${endMsg2}\n\n[ENTER] to restart`;
+        
+        state.overlayMesh = createTextLabelMesh(fullMsg, {
+            font: "28px Courier New", align: "center", width: 600, height: 300, bg: "rgba(30,0,30,0.9)"
+        });
+        state.overlayMesh.position.z = 5;
+        state.scene.add(state.overlayMesh);
     }
-    document.getElementById('restart-prompt').textContent = 'Press [ENTER] to restart';
     
-    go.style.display = 'flex';
-    go.style.alignItems = 'center';
-    go.style.justifyContent = 'center';
-}
-
-function buildWalls() {
-    const wallMat = new THREE.MeshStandardMaterial({color: 0x4a4a6e});
-    const T = 0.5; // thickness
-    const top = new THREE.Mesh(new THREE.BoxGeometry(WORLD_W, T, T), wallMat);
-    top.position.set(0, WORLD_H / 2, 0);
-    const bottom = new THREE.Mesh(new THREE.BoxGeometry(WORLD_W, T, T), wallMat);
-    bottom.position.set(0, -WORLD_H / 2, 0);
-    const left = new THREE.Mesh(new THREE.BoxGeometry(T, WORLD_H, T), wallMat);
-    left.position.set(-WORLD_W / 2, 0, 0);
-    const right = new THREE.Mesh(new THREE.BoxGeometry(T, WORLD_H, T), wallMat);
-    right.position.set(WORLD_W / 2, 0, 0);
-    scene.add(top, bottom, left, right);
-}
-
-function onWindowResize() {
-    const gameCanvasContainer = document.getElementById('game-canvas-container');
-    const newWidth = gameCanvasContainer.offsetWidth;
-    const newHeight = gameCanvasContainer.offsetHeight;
-
-    renderer.setSize(newWidth, newHeight);
-
-    const aspectRatio = newWidth / newHeight;
-    camera.left = -WORLD_W / 2 * aspectRatio;
-    camera.right = WORLD_W / 2 * aspectRatio;
-    camera.top = WORLD_H / 2;
-    camera.bottom = -WORLD_H / 2;
-    camera.updateProjectionMatrix();
-}
-
-function updateHUD() {
-    document.getElementById('score').textContent = 'Items: ' + score + ' / ' + ITEM_COUNT;
-    document.getElementById('timer').textContent = 'Time: ' + Math.ceil(timeLeft);
-    
-    // Hide unused stats specific to other games, and show this game's relevant stats
-    document.getElementById('score').style.display = 'inline'; // Ensure score is visible
-    document.getElementById('timer').style.display = 'inline'; // Ensure timer is visible
-    document.getElementById('lives').style.display = 'none';
-    document.getElementById('phase').style.display = 'none';
-    if(document.getElementById('health')) document.getElementById('health').style.display = 'none';
-    if(document.getElementById('wave')) document.getElementById('wave').style.display = 'none';
-
-    // Also clear content of other specific HUDs and hide them
-    document.getElementById('pong-score').style.display = 'none';
-    document.getElementById('pong-score').textContent = '';
-    document.getElementById('crosshair').style.display = 'none';
-    if(document.getElementById('race3d-ui')) document.getElementById('race3d-ui').style.display = 'none';
-    document.getElementById('message').style.display = 'none';
-    document.getElementById('countdown').style.display = 'none';
-    document.getElementById('wave-announcement').style.display = 'none';
-    document.getElementById('tower-panel').style.display = 'none';
-    document.getElementById('start-wave-btn').style.display = 'none';
-
-
-    // Specific HUD for Collector
-    document.getElementById('game-stats').innerHTML = `
-        <span id="score">Items: ${score} / ${ITEM_COUNT}</span><br>
-        <span id="timer">Time: ${Math.ceil(timeLeft)}</span>
-    `;
-    document.getElementById('game-stats').style.display = 'block'; // Make game-stats visible
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    const deltaTime = clock.getDelta();
-
-    if (isGameOver) {
-        if(keys['Enter']) resetGame();
-    } else {
-        updatePlayer();
-        updateGame(deltaTime);
-        handleCollisions();
-        updateHUD();
+    function clearOverlay(state) {
+        if (state.overlayMesh) {
+            state.scene.remove(state.overlayMesh);
+            disposeMesh(state.overlayMesh);
+            state.overlayMesh = null;
+        }
     }
-    renderer.render(scene, camera);
-}
 
-init();
+    function buildWalls(state) {
+        const wallMat = new THREE.MeshStandardMaterial({color: 0x4a4a6e});
+        const T = 0.5; // thickness
+        const geometries = [
+            new THREE.BoxGeometry(GAME_CONST.WORLD_W + T, T, T), // top
+            new THREE.BoxGeometry(GAME_CONST.WORLD_W + T, T, T), // bottom
+            new THREE.BoxGeometry(T, GAME_CONST.WORLD_H + T, T), // left
+            new THREE.BoxGeometry(T, GAME_CONST.WORLD_H + T, T)  // right
+        ];
+        const positions = [
+            [0, GAME_CONST.WORLD_H / 2, 0],
+            [0, -GAME_CONST.WORLD_H / 2, 0],
+            [-GAME_CONST.WORLD_W / 2, 0, 0],
+            [GAME_CONST.WORLD_W / 2, 0, 0]
+        ];
+        for(let i=0; i < 4; i++) {
+            const wall = new THREE.Mesh(geometries[i], wallMat);
+            wall.position.set(...positions[i]);
+            state.walls.push(wall);
+            state.scene.add(wall);
+        }
+    }
+    
+    function updateHUD(state) {
+        if (state.hudMesh) {
+            state.scene.remove(state.hudMesh);
+            disposeMesh(state.hudMesh);
+        }
+        const text = `Items: ${state.score}/${GAME_CONST.ITEM_COUNT}\nTime: ${Math.ceil(state.timeLeft)}`;
+        state.hudMesh = createTextLabelMesh(text, { font: "20px Courier New", width: 300, height: 60, align: "left" });
+        state.hudMesh.position.set(-GAME_CONST.WORLD_W/2 + 2, GAME_CONST.WORLD_H/2 - 1.8, 0);
+        state.scene.add(state.hudMesh);
+    }
+    
+    function onResize(state) {
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        state.camera.aspect = window.innerWidth / window.innerHeight;
+        state.camera.updateProjectionMatrix();
+    }
+    
+    // Standard utility functions
+    function disposeMesh(mesh) {
+        if (!mesh) return;
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) {
+            if (mesh.material.map) mesh.material.map.dispose();
+            mesh.material.dispose();
+        }
+    }
+
+    function createTextLabelMesh(text, opts) {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const font = opts.font || "24px Arial";
+        ctx.font = font;
+        
+        const lines = text.split("\n");
+        const metrics = lines.map(line => ctx.measureText(line));
+        const textWidth = Math.max(...metrics.map(m => m.width));
+        const textHeight = metrics.reduce((sum, m) => sum + (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent), 0) * 1.4;
+
+        const width = opts.width || THREE.MathUtils.ceilPowerOfTwo(textWidth);
+        const height = opts.height || THREE.MathUtils.ceilPowerOfTwo(textHeight);
+        canvas.width = width;
+        canvas.height = height;
+        
+        ctx.font = font;
+        if (opts.bg) {
+            ctx.fillStyle = opts.bg;
+            ctx.fillRect(0, 0, width, height);
+        }
+        ctx.fillStyle = opts.color || "#fff";
+        ctx.textAlign = opts.align || "center";
+        ctx.textBaseline = "middle";
+
+        const lineH = height / lines.length;
+        const xPos = opts.align === "left" ? 10 : (opts.align === "right" ? width - 10 : width / 2);
+
+        for (let i = 0; i < lines.length; i++) {
+             ctx.fillText(lines[i], xPos, lineH * (i + 0.5));
+        }
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(width/50, height/50),
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false })
+        );
+        mesh.renderOrder = 10;
+        return mesh;
+    }
+
+    // =============== EXPORT DESTROY HANDLER ===============
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        if (loopId) cancelAnimationFrame(loopId);
+        
+        window.removeEventListener('keydown', state.boundKeydown);
+        window.removeEventListener('keyup', state.boundKeyup);
+        window.removeEventListener('resize', state.boundResize);
+
+        if (state.renderer) {
+            if (state.renderer.domElement?.parentNode) {
+                state.renderer.domElement.parentNode.removeChild(state.renderer.domElement);
+            }
+            state.renderer.dispose();
+            try { state.renderer.forceContextLoss(); } catch(e){}
+            state.renderer = null;
+        }
+
+        if (state.scene) {
+            state.scene.traverse(obj => { if (obj.isMesh) disposeMesh(obj); });
+        }
+        state = null;
+    };
+
+    init();
 })();

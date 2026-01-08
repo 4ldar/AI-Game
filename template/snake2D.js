@@ -1,237 +1,217 @@
-(function() {
-// === Snake 2D Game (Refactored) ===
+(function () {
+    // ========== PRIVATE SCOPE ========== 
+    let state = null;
+    let loopId = null;
 
-// Game Settings
-const GRID_SIZE = 22;
-const CELL_SIZE = 0.8;
-const GAME_SPEED = 120; // ms per step
-
-// Globals
-let scene, camera, renderer;
-let snake, food;
-let direction, nextDirection;
-let keys = {};
-let score;
-let isGameOver = false;
-let lastStepTime = 0;
-
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a2e);
-
-    const aspect = window.innerWidth / window.innerHeight;
-    const worldH = GRID_SIZE * CELL_SIZE;
-    const worldW = worldH * aspect;
-    camera = new THREE.OrthographicCamera(-worldW / 2, worldW / 2, worldH / 2, -worldH / 2, 0.1, 100);
-    camera.position.z = 10;
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.getElementById('game-canvas-container').appendChild(renderer.domElement);
-
-    const light = new THREE.AmbientLight(0xffffff, 1.0);
-    scene.add(light);
+    const GAME_CONST = {
+        WORLD_W: 20, WORLD_H: 15, CELL_SIZE: 1,
+        SNAKE_SPEED: 0.15, // time in seconds per move
+    };
     
-    buildWalls();
-    resetGame();
+    function GameState() {
+        this.scene = null; this.camera = null; this.renderer = null; this.clock = new THREE.Clock();
+        this.snake = []; this.food = null;
+        this.direction = new THREE.Vector2(1, 0); // initial right
+        this.nextDirection = new THREE.Vector2(1, 0);
+        this.lastMoveTime = 0;
+        this.score = 0;
+        this.isGameOver = false;
 
-    document.getElementById('info').innerHTML = `
-        <b>Snake 2D</b><br>
-        <span>[ARROWS] / [WASD] : Move</span>
-    `;
+        this.hudMesh = null; this.overlayMesh = null;
+        this.boundKeyDown = null; this.boundResize = null;
+    }
 
-    document.getElementById('restart-btn').addEventListener('click', resetGame);
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('resize', onWindowResize);
+    function init() {
+        state = new GameState();
+        state.scene = new THREE.Scene();
+        state.scene.background = new THREE.Color(0x3a5a3a);
 
-    animate();
-}
+        state.camera = new THREE.OrthographicCamera(-GAME_CONST.WORLD_W/2, GAME_CONST.WORLD_W/2, GAME_CONST.WORLD_H/2, -GAME_CONST.WORLD_H/2, 0.1, 100);
+        state.camera.position.z = 10;
+        
+        state.renderer = new THREE.WebGLRenderer({ antialias: true });
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById("game-canvas-container").appendChild(state.renderer.domElement);
+        
+        state.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        state.scene.add(new THREE.DirectionalLight(0xffffff, 0.4).position.set(5,10,5));
 
-function resetGame() {
-    isGameOver = false;
-    score = 0;
-    direction = new THREE.Vector2(1, 0);
-    nextDirection = new THREE.Vector2(1, 0);
-    
-    if (snake) snake.forEach(s => scene.remove(s));
-    snake = [];
-    
-    if(food) scene.remove(food);
-    food = null;
+        state.boundKeyDown = e => onKeyDown(e, state);
+        state.boundResize = () => onResize(state);
+        window.addEventListener('keydown', state.boundKeyDown);
+        window.addEventListener('resize', state.boundResize);
 
-    // Create initial snake
-    const startX = -Math.floor(GRID_SIZE / 4);
-    for (let i = 0; i < 3; i++) {
-        const segment = createSegment(new THREE.Vector2(startX - i, 0));
-        snake.push(segment);
+        resetGame(state);
+        animate();
     }
     
-    spawnFood();
-    updateHUD();
-    document.getElementById('gameover').style.display = 'none';
-}
-
-function createSegment(pos, isHead = false) {
-    const geo = new THREE.BoxGeometry(CELL_SIZE, CELL_SIZE, CELL_SIZE * 0.8);
-    const mat = new THREE.MeshStandardMaterial({ 
-        color: isHead ? 0x33dd33 : 0x00ff00,
-        roughness: 0.4
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(pos.x * CELL_SIZE, pos.y * CELL_SIZE, 0);
-    mesh.userData.gridPosition = pos;
-    scene.add(mesh);
-    return mesh;
-}
-
-function spawnFood() {
-    if (food) scene.remove(food);
+    function resetGame(state) {
+        state.isGameOver = false; state.score = 0;
+        state.direction.set(1, 0); state.nextDirection.set(1, 0);
+        state.lastMoveTime = state.clock.getElapsedTime();
+        
+        state.snake.forEach(s => state.scene.remove(s));
+        state.snake = [];
+        if (state.food) state.scene.remove(state.food);
+        state.food = null;
+        
+        createSnake(state);
+        spawnFood(state);
+        
+        clearOverlay(state);
+        updateHUD(state);
+    }
     
-    let pos;
-    let validPosition = false;
-    const halfGrid = Math.floor(GRID_SIZE / 2);
+    function animate() {
+        loopId = requestAnimationFrame(animate);
+        if(!state) return;
+        
+        if (state.isGameOver) {
+            if (state.keys['Enter'] || state.keys['KeyR']) resetGame(state);
+        } else {
+            const currentTime = state.clock.getElapsedTime();
+            if (currentTime - state.lastMoveTime > GAME_CONST.SNAKE_SPEED) {
+                state.lastMoveTime = currentTime;
+                state.direction.copy(state.nextDirection);
+                updateGame(state);
+                updateHUD(state);
+            }
+        }
+        state.renderer.render(state.scene, state.camera);
+    }
     
-    while (!validPosition) {
-        pos = new THREE.Vector2(
-            THREE.MathUtils.randInt(-halfGrid, halfGrid - 1),
-            THREE.MathUtils.randInt(-halfGrid, halfGrid - 1)
+    function createSnake(state) {
+        const head = new THREE.Mesh(new THREE.BoxGeometry(GAME_CONST.CELL_SIZE,GAME_CONST.CELL_SIZE,GAME_CONST.CELL_SIZE), new THREE.MeshBasicMaterial({color:0x00ff00}));
+        head.position.set(0,0,0);
+        state.snake.push(head);
+        state.scene.add(head);
+        for(let i=1; i<3; ++i) {
+            const segment = new THREE.Mesh(new THREE.BoxGeometry(GAME_CONST.CELL_SIZE,GAME_CONST.CELL_SIZE,GAME_CONST.CELL_SIZE), new THREE.MeshBasicMaterial({color:0x00cc00}));
+            segment.position.set(-i * GAME_CONST.CELL_SIZE, 0, 0);
+            state.snake.push(segment);
+            state.scene.add(segment);
+        }
+    }
+
+    function spawnFood(state) {
+        if (state.food) state.scene.remove(state.food);
+        let foodX, foodY;
+        do {
+            foodX = Math.floor(Math.random() * GAME_CONST.WORLD_W / GAME_CONST.CELL_SIZE) * GAME_CONST.CELL_SIZE - (GAME_CONST.WORLD_W/2 - GAME_CONST.CELL_SIZE/2);
+            foodY = Math.floor(Math.random() * GAME_CONST.WORLD_H / GAME_CONST.CELL_SIZE) * GAME_CONST.CELL_SIZE - (GAME_CONST.WORLD_H/2 - GAME_CONST.CELL_SIZE/2);
+        } while (state.snake.some(s => s.position.x === foodX && s.position.y === foodY));
+
+        state.food = new THREE.Mesh(new THREE.SphereGeometry(GAME_CONST.CELL_SIZE/2, 8, 8), new THREE.MeshBasicMaterial({color:0xff0000}));
+        state.food.position.set(foodX, foodY, 0);
+        state.scene.add(state.food);
+    }
+    
+    function updateGame(state) {
+        const head = state.snake[0];
+        const newHeadPos = new THREE.Vector3(
+            head.position.x + state.direction.x * GAME_CONST.CELL_SIZE,
+            head.position.y + state.direction.y * GAME_CONST.CELL_SIZE,
+            0
         );
-        validPosition = !snake.some(s => s.userData.gridPosition.equals(pos));
+
+        // Wall collision
+        const halfW = GAME_CONST.WORLD_W/2, halfH = GAME_CONST.WORLD_H/2;
+        if (Math.abs(newHeadPos.x) >= halfW || Math.abs(newHeadPos.y) >= halfH) {
+            handleEndGame(state); return;
+        }
+
+        // Self collision
+        if (state.snake.some((s, i) => i > 0 && s.position.equals(newHeadPos))) {
+            handleEndGame(state); return;
+        }
+
+        // Move snake
+        const newHead = head.clone();
+        newHead.position.copy(newHeadPos);
+        state.snake.unshift(newHead);
+        state.scene.add(newHead);
+
+        // Food collision
+        if (newHeadPos.equals(state.food.position)) {
+            state.score += 10;
+            state.scene.remove(state.food);
+            spawnFood(state);
+        } else {
+            const tail = state.snake.pop();
+            state.scene.remove(tail);
+        }
+        state.scene.remove(head);
+        state.snake[0] = newHead;
+    }
+
+    function onKeyDown(e, state) {
+        state.keys[e.code] = true;
+        const currentDir = state.direction;
+        const newDir = state.nextDirection.clone();
+
+        if (e.code === 'ArrowUp' && currentDir.y === 0) newDir.set(0, 1);
+        else if (e.code === 'ArrowDown' && currentDir.y === 0) newDir.set(0, -1);
+        else if (e.code === 'ArrowLeft' && currentDir.x === 0) newDir.set(-1, 0);
+        else if (e.code === 'ArrowRight' && currentDir.x === 0) newDir.set(1, 0);
+        
+        if (!newDir.equals(currentDir) && !newDir.equals(currentDir.clone().negate())) {
+            state.nextDirection.copy(newDir);
+        }
+    }
+
+    function handleEndGame(state) {
+        if(state.isGameOver) return;
+        state.isGameOver = true;
+        showOverlay(state, `GAME OVER\nScore: ${state.score}\n\n[ENTER] to restart`, true);
     }
     
-    const geo = new THREE.SphereGeometry(CELL_SIZE / 2.5, 12, 12);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.2 });
-    food = new THREE.Mesh(geo, mat);
-    food.position.set(pos.x * CELL_SIZE, pos.y * CELL_SIZE, 0);
-    food.userData.gridPosition = pos;
-    scene.add(food);
-}
-
-function updateGame() {
-    if (isGameOver) return;
-    
-    direction.copy(nextDirection);
-    const headPos = snake[0].userData.gridPosition.clone();
-    const newHeadPos = headPos.add(direction);
-
-    // Collision checks
-    if (checkWallCollision(newHeadPos) || checkSelfCollision(newHeadPos)) {
-        handleGameOver(checkWallCollision(newHeadPos) ? "You hit the wall!" : "You hit yourself!");
-        return;
-    }
-
-    const ateFood = newHeadPos.equals(food.userData.gridPosition);
-
-    // Add new head
-    const newHead = createSegment(newHeadPos, true);
-    snake.unshift(newHead);
-    snake[1].material.color.setHex(0x00ff00); // Old head becomes body
-
-    if (ateFood) {
-        score += 10;
-        spawnFood();
-    } else {
-        const tail = snake.pop();
-        scene.remove(tail);
+    function onResize(state) {
+        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        const aspect = window.innerWidth / window.innerHeight;
+        const targetAspect = GAME_CONST.WORLD_W / GAME_CONST.WORLD_H;
+        
+        let w = GAME_CONST.WORLD_W, h = GAME_CONST.WORLD_H;
+        if(aspect > targetAspect) w = h * aspect;
+        else h = w / aspect;
+        
+        state.camera.left = -w / 2; state.camera.right = w / 2;
+        state.camera.top = h / 2; state.camera.bottom = -h / 2;
+        state.camera.updateProjectionMatrix();
     }
     
-    updateHUD();
-}
-
-function checkWallCollision(pos) {
-    const halfGrid = GRID_SIZE / 2;
-    return pos.x >= halfGrid || pos.x < -halfGrid || pos.y >= halfGrid || pos.y < -halfGrid;
-}
-
-function checkSelfCollision(pos) {
-    // Check against all but the last segment (which will move)
-    return snake.slice(0, -1).some(s => s.userData.gridPosition.equals(pos));
-}
-
-function handleGameOver(reason) {
-    isGameOver = true;
-    const go = document.getElementById('gameover');
-    document.getElementById('end-message').textContent = "GAME OVER";
-    document.getElementById('end-reason').textContent = reason;
-    document.getElementById('end-score').textContent = `Final Score: ${score}`;
-    document.getElementById('restart-prompt').textContent = ''; // Hide generic restart prompt
-    go.style.display = 'flex';
-    go.style.alignItems = 'center';
-    go.style.justifyContent = 'center';
-}
-
-function onKeyDown(e) {
-    if (isGameOver) {
-        if (e.code === 'Enter' || e.code === 'Space') resetGame();
-        return;
+    function updateHUD(state) {
+        if(state.hudMesh) { state.scene.remove(state.hudMesh); disposeMesh(state.hudMesh); }
+        state.hudMesh = createTextLabelMesh(`Score: ${state.score}`, { font: "24px Courier New", width: 300, height: 50, align: "left" });
+        const cam = state.camera;
+        state.hudMesh.position.set(cam.left + 2.5, cam.top - 1.5, 0);
+        state.scene.add(state.hudMesh);
     }
-    if ((e.code === 'ArrowUp' || e.code === 'KeyW') && direction.y === 0) nextDirection.set(0, 1);
-    if ((e.code === 'ArrowDown' || e.code === 'KeyS') && direction.y === 0) nextDirection.set(0, -1);
-    if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && direction.x === 0) nextDirection.set(-1, 0);
-    if ((e.code === 'ArrowRight' || e.code === 'KeyD') && direction.x === 0) nextDirection.set(1, 0);
-}
 
-function buildWalls() {
-    const wallMat = new THREE.MeshStandardMaterial({color: 0x3a3a5e, roughness: 0.8});
-    const halfSize = GRID_SIZE * CELL_SIZE / 2;
-    const thickness = CELL_SIZE;
-    
-    const top = new THREE.Mesh(new THREE.BoxGeometry(GRID_SIZE*CELL_SIZE + thickness, thickness, thickness), wallMat);
-    top.position.set(0, halfSize, 0);
-    scene.add(top);
-
-    const bottom = new THREE.Mesh(new THREE.BoxGeometry(GRID_SIZE*CELL_SIZE + thickness, thickness, thickness), wallMat);
-    bottom.position.set(0, -halfSize, 0);
-    scene.add(bottom);
-    
-    const left = new THREE.Mesh(new THREE.BoxGeometry(thickness, GRID_SIZE*CELL_SIZE, thickness), wallMat);
-    left.position.set(-halfSize, 0, 0);
-    scene.add(left);
-    
-    const right = new THREE.Mesh(new THREE.BoxGeometry(thickness, GRID_SIZE*CELL_SIZE, thickness), wallMat);
-    right.position.set(halfSize, 0, 0);
-    scene.add(right);
-}
-
-function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    const worldH = GRID_SIZE * CELL_SIZE;
-    const worldW = worldH * aspect;
-    camera.left = -worldW / 2;
-    camera.right = worldW / 2;
-    camera.top = worldH / 2;
-    camera.bottom = -worldH / 2;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-function updateHUD() {
-    document.getElementById('score').textContent = `Score: ${score}`;
-    document.getElementById('lives').style.display = 'none'; // Hide lives for this game
-    document.getElementById('timer').style.display = 'none'; // Hide timer for this game
-    document.getElementById('phase').style.display = 'none'; // Hide phase for this game
-    document.getElementById('pong-score').style.display = 'none'; // Hide pong-score for this game
-    document.getElementById('health').style.display = 'none'; // Hide health for this game
-    if(document.getElementById('race3d-ui')) document.getElementById('race3d-ui').style.display = 'none'; // Hide race3d-ui for this game
-    document.getElementById('message').style.display = 'none'; // Hide message for this game
-    document.getElementById('countdown').style.display = 'none'; // Hide countdown for this game
-
-    // Specific HUD for Snake
-    document.getElementById('game-stats').innerHTML = `
-        <span id="score">Score: ${score}</span>
-    `;
-}
-
-function animate(timestamp) {
-    requestAnimationFrame(animate);
-
-    if (!isGameOver && timestamp - lastStepTime > GAME_SPEED) {
-        lastStepTime = timestamp;
-        updateGame();
+    function showOverlay(state, text, bg) { clearOverlay(state); state.overlayMesh = createTextLabelMesh(text, {font:"32px Courier New", align:"center", width:500,height:250,...(bg&&{bg:'rgba(0,0,0,0.8)'})}); state.overlayMesh.position.z=5; state.scene.add(state.overlayMesh); }
+    function clearOverlay(state) { if(state.overlayMesh) { state.scene.remove(state.overlayMesh); disposeMesh(state.overlayMesh); state.overlayMesh = null; } }
+    function disposeMesh(mesh) { if(mesh?.geometry) mesh.geometry.dispose(); if(mesh?.material) mesh.material.dispose(); }
+    function createTextLabelMesh(text, opts) {
+        const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+        const font=opts.font||"24px Arial", w=opts.width||512, h=opts.height||128;
+        canvas.width=w; canvas.height=h; ctx.font=font;
+        if(opts.bg){ctx.fillStyle=opts.bg; ctx.fillRect(0,0,w,h);}
+        ctx.fillStyle=opts.color||"#fff"; ctx.textAlign=opts.align||"center"; ctx.textBaseline="middle";
+        const lines=text.split("\n"), lH=h/lines.length, x=opts.align==='left'?20:w/2;
+        for(let i=0; i<lines.length; i++) ctx.fillText(lines[i], x, lH*(i+0.5));
+        const tex = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w/25, h/25), new THREE.MeshBasicMaterial({map:tex,transparent:true}));
+        mesh.renderOrder=10; return mesh;
     }
-    
-    renderer.render(scene, camera);
-}
 
-init();
+    window.__GAME_DESTROY = function () {
+        if (!state) return;
+        if (loopId) cancelAnimationFrame(loopId);
+        window.removeEventListener('keydown', state.boundKeyDown);
+        window.removeEventListener('resize', state.boundResize);
+        if (state.renderer) { const c=state.renderer.domElement; if(c?.parentNode) c.parentNode.removeChild(c); state.renderer.dispose(); }
+        if (state.scene) state.scene.traverse(o => { if (o.isMesh) disposeMesh(o); });
+        state = null;
+    };
+
+    init();
 })();

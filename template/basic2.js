@@ -19,7 +19,7 @@
 
         // Scene
         state.scene = new THREE.Scene();
-        state.scene.background = new THREE.Color(0x111111); // Gelap, mirip space
+        state.scene.background = new THREE.Color(0x111111);
 
         // Camera
         state.camera = new THREE.PerspectiveCamera(
@@ -37,7 +37,7 @@
 
         // Game Objects
         state.box = new THREE.Mesh(
-            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.BoxGeometry(1, 1, 1), // Ukuran disamakan dengan basic.js agar konsisten
             new THREE.MeshBasicMaterial({ color: 0x00ff00 })
         );
         state.scene.add(state.box);

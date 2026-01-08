@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <style>
+        body{
+            background: #000;
+            color:white;
+        }
+        .editor-container{
+            display: grid;
+            grid-template-columns: 20% 60% 20%;
+            height: 95vh;
+        }
+        .editor-container .item-container{
+            display: flex;
+            align-items: center;
+            flex-direction: column;
+            border: 1px solid white;
+        }
+        .canvas-container{
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .game{
+            height: 90%;
+            width: 90%;
+            color: #000;
+        }
+        #canvas{
+            display: flex;
+            height: 100%;
+            width: 100%;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="editor-container">
+        <div class="item-container">
+            <h2>Opsi</h2>
+            <div class="element">
+                Benda
+                <ul>
+                    <li><button onclick="addElement('kubus')">kubus</button></li>
+                    <li><button onclick="addElement('segitiga')">Segitiga</button></li>
+                    <li><button onclick="addElement('bola')">Bola</button></li>
+                </ul>
+
+                Player
+                <ul>
+                    <li><button onclick="addPlayer(2)">orang pertama</button></li>
+                    <li><button onclick="addPlayer(2)">orang ke tiga</button></li>
+                </ul>
+
+                World
+                <ul>
+                    <li><button onclick="addFloor()">tanah</button></li>
+                    <li><button onclick="addSky(2)">langit</button></li>
+                </ul>
+
+                NPC
+                <ul>
+                    <li><button onclick="addNPC(1)">simple cube</button></li>
+                    <li><button onclick="addNPC(2)">cylinder</button></li>
+                    <li><button onclick="addNPC(2)">male poly</button></li>
+                    <li><button onclick="addNPC(2)">female poly</button></li>
+                    <input type="file" id="fileInput" accept=".glb, .gltf">
+                </ul>
+                
+                Hostile
+                <ul>
+                    <li><button onclick="addNPC(1)">simple cube</button></li>
+                    <li><button onclick="addNPC(1)">simple sphere</button></li>
+                    <li><button onclick="addNPC(2)">zombie</button></li>
+                    <input type="file" id="fileInput" accept=".glb, .gltf">
+                </ul>
+            </div>
+        </div>
+        <div class="item-container">
+            <h2>Canvas <button onclick="preview()">preview</button> <button onClick="kode()">code</button></h2>
+            <div class="game canvas-container">
+
+                <div id="canvas"></div>
+                <textarea id="codeDisplay" style="display:none; width:100%; height:100%; background:black; color:white;"></textarea>
+            </div>
+
+        </div>
+        <div class="item-container">
+            <h2>Inspektor</h2>
+        </div>
+    </div>
+</body>
+<script>
+    function preview(){
+        document.getElementById('canvas').style.display = 'block';
+        document.getElementById('codeDisplay').style.display = 'none';
+    }
+    function kode(){
+        document.getElementById('canvas').style.display = 'none';
+        document.getElementById('codeDisplay').style.display = 'block';
+        document.getElementById('codeDisplay').value = `
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.z = 5;
+
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const floorGeometry = new THREE.PlaneGeometry(100, 100);
+const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
+
+const ambientLight = new THREE.AmbientLight(0x404040);
+scene.add(ambientLight);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+directionalLight.position.set(10, 10, 5);
+scene.add(directionalLight);
+
+function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+}
+animate();`;
+    }
+</script>
+
+<script>
+    let scene, camera, renderer, floor;
+    const canvasElement = document.getElementById('canvas');
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); // Blue sky
+    camera = new THREE.PerspectiveCamera(75, canvasElement.offsetWidth / canvasElement.offsetHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer();
+    renderer.setSize(canvasElement.offsetWidth, canvasElement.offsetHeight);
+    canvasElement.appendChild(renderer.domElement);
+    camera.position.z = 5;
+    
+    // Add floor
+    const floorGeometry = new THREE.PlaneGeometry(100, 100);
+    const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 }); // Brown
+    floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+    
+    // Add lights
+    const ambientLight = new THREE.AmbientLight(0x404040);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(10, 10, 5);
+    scene.add(directionalLight);
+    
+
+    function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+    }
+    animate();
+</script>
+</html>
