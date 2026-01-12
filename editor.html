@@ -1,172 +1,276 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>3D Game Editor</title>
     <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="js/editor-core.js"></script>   
+    <script src="js/object-management.js"></script>
+    <script src="js/camera-controls.js"></script>
+    <script src="js/inspector.js"></script>
+    <script src="js/code-generator.js"></script>
+    <script src="js/mode-switching.js"></script>
+    <script src="js/animation.js"></script>
     <style>
-        body{
+        body {
             background: #000;
-            color:white;
+            color: white;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
         }
-        .editor-container{
+        .editor-container {
             display: grid;
             grid-template-columns: 20% 60% 20%;
-            height: 95vh;
+            height: 100vh;
+            gap: 5px;
         }
-        .editor-container .item-container{
+        .editor-container .item-container {
             display: flex;
             align-items: center;
             flex-direction: column;
-            border: 1px solid white;
+            border: 1px solid #444;
+            padding: 10px;
+            overflow-y: auto;
+            height: 100%;
         }
-        .canvas-container{
+        .canvas-container {
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            height: 100%;
         }
-        .game{
-            height: 90%;
-            width: 90%;
-            color: #000;
-        }
-        #canvas{
-            display: flex;
+        .game {
             height: 100%;
             width: 100%;
-            background: white;
+            position: relative;
+        }
+        #canvas {
+            display: block;
+            height: 100%;
+            width: 100%;
+            background: #1a1a1a;
+        }
+        #canvas canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block !important;
+        }
+        #codeDisplay {
+            display: none;
+            width: 100%;
+            height: 100%;
+            background: #0d1117;
+            color: #c9d1d9;
+            border: none;
+            padding: 10px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            resize: none;
+        }
+        button {
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            padding: 8px 15px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #555;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+        li {
+            margin: 5px 0;
+        }
+        input[type="file"] {
+            color: white;
+            margin: 5px;
+        }
+        .inspector-section {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .inspector-input {
+            width: 100%;
+            margin: 5px 0;
+            padding: 5px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+        }
+        .object-list {
+            max-height: 200px;
+            overflow-y: auto;
+            width: 100%;
+        }
+        .selected-object {
+            background: #2a2a2a;
+            padding: 5px;
+            margin: 5px 0;
+            cursor: pointer;
+        }
+        .selected-object.active {
+            background: #3a5a78;
+        }
+        .mode-buttons {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .mode-buttons button.active {
+            background: #007bff;
+        }
+        .control-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        .animation-controls {
+            margin: 8px 0;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .animation-controls label {
+            font-size: 12px;
+            color: white;
+            min-width: 100px;
+        }
+        .anim-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .anim-btn:hover {
+            background: #0056b3;
         }
     </style>
 </head>
 <body>
     <div class="editor-container">
+        <!-- Left Panel - Object Library -->
         <div class="item-container">
-            <h2>Opsi</h2>
+            <h2>Object Library</h2>
+            <div class="mode-buttons">
+                <button id="editModeBtn" class="active" onclick="setEditMode()">Edit Mode</button>
+                <button id="previewModeBtn" onclick="setPreviewMode()">Preview Mode</button>
+            </div>
             <div class="element">
-                Benda
+                <h3>Primitives</h3>
                 <ul>
-                    <li><button onclick="addElement('kubus')">kubus</button></li>
-                    <li><button onclick="addElement('segitiga')">Segitiga</button></li>
-                    <li><button onclick="addElement('bola')">Bola</button></li>
+                    <li><button onclick="addObject('cube')">Cube</button></li>
+                    <li><button onclick="addObject('sphere')">Sphere</button></li>
+                    <li><button onclick="addObject('cone')">Cone</button></li>
+                    <li><button onclick="addObject('cylinder')">Cylinder</button></li>
+                    <li><button onclick="addObject('plane')">Plane</button></li>
                 </ul>
 
-                Player
+                <h3>Lights</h3>
                 <ul>
-                    <li><button onclick="addPlayer(2)">orang pertama</button></li>
-                    <li><button onclick="addPlayer(2)">orang ke tiga</button></li>
+                    <li><button onclick="addLight('ambient')">Ambient Light</button></li>
+                    <li><button onclick="addLight('directional')">Directional Light</button></li>
+                    <li><button onclick="addLight('point')">Point Light</button></li>
                 </ul>
 
-                World
+                <h3>Import</h3>
                 <ul>
-                    <li><button onclick="addFloor()">tanah</button></li>
-                    <li><button onclick="addSky(2)">langit</button></li>
-                </ul>
-
-                NPC
-                <ul>
-                    <li><button onclick="addNPC(1)">simple cube</button></li>
-                    <li><button onclick="addNPC(2)">cylinder</button></li>
-                    <li><button onclick="addNPC(2)">male poly</button></li>
-                    <li><button onclick="addNPC(2)">female poly</button></li>
-                    <input type="file" id="fileInput" accept=".glb, .gltf">
-                </ul>
-                
-                Hostile
-                <ul>
-                    <li><button onclick="addNPC(1)">simple cube</button></li>
-                    <li><button onclick="addNPC(1)">simple sphere</button></li>
-                    <li><button onclick="addNPC(2)">zombie</button></li>
-                    <input type="file" id="fileInput" accept=".glb, .gltf">
+                    <li>
+                        <input type="file" id="gltfInput" accept=".glb,.gltf" onchange="loadGLTF(this.files[0])">
+                    </li>
                 </ul>
             </div>
         </div>
+
+        <!-- Center Panel - Canvas -->
         <div class="item-container">
-            <h2>Canvas <button onclick="preview()">preview</button> <button onClick="kode()">code</button></h2>
+            <h2>Canvas 
+                <button onclick="switchToPreview()">Preview</button>
+                <button onclick="switchToCode()">Code</button>
+                <button onclick="exportGame()">Export</button>
+            </h2>
             <div class="game canvas-container">
-
                 <div id="canvas"></div>
-                <textarea id="codeDisplay" style="display:none; width:100%; height:100%; background:black; color:white;"></textarea>
+                <textarea id="codeDisplay"></textarea>
+                <div class="control-info">
+                    Edit Mode: LMB+Drag = Rotate, Shift+LMB = Pan, Wheel = Zoom<br>
+                    Preview Mode: WASD = Move, Mouse = Look
+                </div>
             </div>
-
         </div>
+
+        <!-- Right Panel - Inspector -->
         <div class="item-container">
-            <h2>Inspektor</h2>
+            <h2>Inspector</h2>
+            <div id="inspectorContent">
+                <div class="object-list" id="objectList"></div>
+                <div id="propertyEditor" style="display:none;">
+                    <div class="inspector-section">
+                        <h3>Transform</h3>
+                        Position:
+                        <input type="number" class="inspector-input" data-property="position.x" step="0.1" placeholder="X">
+                        <input type="number" class="inspector-input" data-property="position.y" step="0.1" placeholder="Y">
+                        <input type="number" class="inspector-input" data-property="position.z" step="0.1" placeholder="Z">
+                        
+                        Rotation:
+                        <input type="number" class="inspector-input" data-property="rotation.x" step="0.1" placeholder="X">
+                        <input type="number" class="inspector-input" data-property="rotation.y" step="0.1" placeholder="Y">
+                        <input type="number" class="inspector-input" data-property="rotation.z" step="0.1" placeholder="Z">
+                        
+                        Scale:
+                        <input type="number" class="inspector-input" data-property="scale.x" step="0.1" placeholder="X">
+                        <input type="number" class="inspector-input" data-property="scale.y" step="0.1" placeholder="Y">
+                        <input type="number" class="inspector-input" data-property="scale.z" step="0.1" placeholder="Z">
+                    </div>
+                    
+                    <div class="inspector-section" id="materialSection" style="display:none;">
+                        <h3>Material</h3>
+                        Color: <input type="color" class="inspector-input" data-property="material.color">
+                        <button onclick="updateSelectedObject()">Apply Changes</button>
+                        <button onclick="deleteSelectedObject()" style="background:#dc3545;">Delete Object</button>
+                    </div>
+
+                    <div class="inspector-section" id="animationSection" style="display:none;">
+                        <h3>Animation (Preview Mode Only)</h3>
+                        <div class="animation-controls">
+                            <label>Move to Position:</label>
+                            <input type="number" id="animPosX" step="0.1" placeholder="X" style="width: 60px;">
+                            <input type="number" id="animPosY" step="0.1" placeholder="Y" style="width: 60px;">
+                            <input type="number" id="animPosZ" step="0.1" placeholder="Z" style="width: 60px;">
+                            <button onclick="animateToPosition()" class="anim-btn">Move</button>
+                        </div>
+                        <div class="animation-controls">
+                            <button onclick="animateToCamera()" class="anim-btn" style="width: 100%;">Move to Camera</button>
+                        </div>
+                        <div class="animation-controls">
+                            <label>Duration (seconds):</label>
+                            <input type="number" id="animDuration" value="2" step="0.1" min="0.1" style="width: 80px;">
+                        </div>
+                        <div class="animation-controls">
+                            <button onclick="stopAnimation()" class="anim-btn" style="background:#ffc107;">Stop Animation</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
+
+    
 </body>
-<script>
-    function preview(){
-        document.getElementById('canvas').style.display = 'block';
-        document.getElementById('codeDisplay').style.display = 'none';
-    }
-    function kode(){
-        document.getElementById('canvas').style.display = 'none';
-        document.getElementById('codeDisplay').style.display = 'block';
-        document.getElementById('codeDisplay').value = `
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.z = 5;
-
-const renderer = new THREE.WebGLRenderer();
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-const floorGeometry = new THREE.PlaneGeometry(100, 100);
-const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-floor.rotation.x = -Math.PI / 2;
-scene.add(floor);
-
-const ambientLight = new THREE.AmbientLight(0x404040);
-scene.add(ambientLight);
-
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-directionalLight.position.set(10, 10, 5);
-scene.add(directionalLight);
-
-function animate() {
-    requestAnimationFrame(animate);
-    renderer.render(scene, camera);
-}
-animate();`;
-    }
-</script>
-
-<script>
-    let scene, camera, renderer, floor;
-    const canvasElement = document.getElementById('canvas');
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB); // Blue sky
-    camera = new THREE.PerspectiveCamera(75, canvasElement.offsetWidth / canvasElement.offsetHeight, 0.1, 1000);
-    renderer = new THREE.WebGLRenderer();
-    renderer.setSize(canvasElement.offsetWidth, canvasElement.offsetHeight);
-    canvasElement.appendChild(renderer.domElement);
-    camera.position.z = 5;
-    
-    // Add floor
-    const floorGeometry = new THREE.PlaneGeometry(100, 100);
-    const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 }); // Brown
-    floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
-    
-    // Add lights
-    const ambientLight = new THREE.AmbientLight(0x404040);
-    scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(10, 10, 5);
-    scene.add(directionalLight);
-    
-
-    function animate() {
-        requestAnimationFrame(animate);
-        renderer.render(scene, camera);
-    }
-    animate();
-</script>
 </html>
