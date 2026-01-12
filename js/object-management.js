@@ -143,6 +143,7 @@ function addLight(type) {
 }
 
 // Load GLTF models
+// Update the loadGLTF function:
 function loadGLTF(file) {
     if (!scene) return;
     if (!file) return;
@@ -158,6 +159,8 @@ function loadGLTF(file) {
             model.userData.type = 'gltf';
             model.userData.name = `Model_${objects.length}`;
             model.userData.fileName = file.name;
+            // Store the original file for export
+            model.userData.originalFile = file;
 
             // Enable shadows for all meshes in the model
             model.traverse(child => {
