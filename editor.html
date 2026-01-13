@@ -7,10 +7,11 @@
     <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="js/editor-core.js"></script>   
     <script src="js/object-management.js"></script>
+    <script src="js/material-editor.js"></script>
     <script src="js/camera-controls.js"></script>
     <script src="js/inspector.js"></script>
+    <script src="js/editor-core.js"></script>
     <script src="js/code-generator.js"></script>
     <script src="js/mode-switching.js"></script>
     <script src="js/animation.js"></script>
@@ -249,60 +250,193 @@
         </div>
 
         <!-- Right Panel - Inspector -->
-        <div class="item-container">
-            <h2>Inspector</h2>
-            <div id="inspectorContent">
-                <div class="object-list" id="objectList"></div>
-                <div id="propertyEditor" style="display:none;">
-                    <div class="inspector-section">
-                        <h3>Transform</h3>
-                        Position:
-                        <input type="number" class="inspector-input" data-property="position.x" step="0.1" placeholder="X">
-                        <input type="number" class="inspector-input" data-property="position.y" step="0.1" placeholder="Y">
-                        <input type="number" class="inspector-input" data-property="position.z" step="0.1" placeholder="Z">
-                        
-                        Rotation:
-                        <input type="number" class="inspector-input" data-property="rotation.x" step="0.1" placeholder="X">
-                        <input type="number" class="inspector-input" data-property="rotation.y" step="0.1" placeholder="Y">
-                        <input type="number" class="inspector-input" data-property="rotation.z" step="0.1" placeholder="Z">
-                        
-                        Scale:
-                        <input type="number" class="inspector-input" data-property="scale.x" step="0.1" placeholder="X">
-                        <input type="number" class="inspector-input" data-property="scale.y" step="0.1" placeholder="Y">
-                        <input type="number" class="inspector-input" data-property="scale.z" step="0.1" placeholder="Z">
-                        
+<div class="item-container">
+    <h2>Inspector</h2>
+    <div id="inspectorContent">
+        <div class="object-list" id="objectList"></div>
+        <div id="propertyEditor" style="display:none;">
+            <div class="inspector-section">
+                <h3>Transform</h3>
+                Position:
+                <input type="number" class="inspector-input" data-property="position.x" step="0.1" placeholder="X">
+                <input type="number" class="inspector-input" data-property="position.y" step="0.1" placeholder="Y">
+                <input type="number" class="inspector-input" data-property="position.z" step="0.1" placeholder="Z">
+                
+                Rotation:
+                <input type="number" class="inspector-input" data-property="rotation.x" step="0.1" placeholder="X">
+                <input type="number" class="inspector-input" data-property="rotation.y" step="0.1" placeholder="Y">
+                <input type="number" class="inspector-input" data-property="rotation.z" step="0.1" placeholder="Z">
+                
+                Scale:
+                <input type="number" class="inspector-input" data-property="scale.x" step="0.1" placeholder="X">
+                <input type="number" class="inspector-input" data-property="scale.y" step="0.1" placeholder="Y">
+                <input type="number" class="inspector-input" data-property="scale.z" step="0.1" placeholder="Z">
+            </div>
+            
+            <!-- Updated Material Section with roughness/metalness controls -->
+            <div class="inspector-section" id="materialSection" style="display:none; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #4fc3f7;">Material</h3>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 5px;">Color</label>
+                    <input type="color" data-property="material.color" class="inspector-input" 
+                           onchange="updateObjectProperty(event)" value="#ffffff"
+                           style="width: 100%; height: 40px; padding: 0; border: none; border-radius: 4px;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 5px;">Roughness</label>
+                    <input type="range" min="0" max="1" step="0.01" data-property="material.roughness" 
+                           class="inspector-input" oninput="updateObjectProperty(event)" value="0.7"
+                           style="width: 100%; margin-bottom: 5px;">
+                    <div style="display: flex; justify-content: space-between; color: #888; font-size: 12px;">
+                        <span>Smooth</span>
+                        <span>Rough</span>
                     </div>
-                    
-                    <div class="inspector-section" id="materialSection" style="display:none;">
-                        <h3>Material</h3>
-                        Color: <input type="color" class="inspector-input" data-property="material.color">
-                        <button onclick="updateSelectedObject()">Apply Changes</button>
-                        <button onclick="deleteSelectedObject()" style="background:#dc3545;">Delete Object</button>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 5px;">Metalness</label>
+                    <input type="range" min="0" max="1" step="0.01" data-property="material.metalness" 
+                           class="inspector-input" oninput="updateObjectProperty(event)" value="0.2"
+                           style="width: 100%; margin-bottom: 5px;">
+                    <div style="display: flex; justify-content: space-between; color: #888; font-size: 12px;">
+                        <span>Non-Metallic</span>
+                        <span>Metallic</span>
                     </div>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button onclick="updateSelectedObject()" class="button" style="flex: 1; padding: 10px;">Apply Changes</button>
+                    <button onclick="deleteSelectedObject()" class="button" style="flex: 1; padding: 10px; background: #dc3545;">Delete Object</button>
+                </div>
+            </div>
 
-                    <div class="inspector-section" id="animationSection" style="display:none;">
-                        <h3>Animation (Preview Mode Only)</h3>
-                        <div class="animation-controls">
-                            <label>Move to Position:</label>
-                            <input type="number" id="animPosX" step="0.1" placeholder="X" style="width: 60px;">
-                            <input type="number" id="animPosY" step="0.1" placeholder="Y" style="width: 60px;">
-                            <input type="number" id="animPosZ" step="0.1" placeholder="Z" style="width: 60px;">
-                            <button onclick="animateToPosition()" class="anim-btn">Move</button>
+            <!-- New Texture Section -->
+            <div class="inspector-section" id="textureSection" style="display: none; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #4fc3f7;">Texture</h3>
+                
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                    <div id="texturePreview" style="width: 80px; height: 80px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px; overflow: hidden;">
+                        No Texture
+                    </div>
+                    <div style="flex: 1;">
+                        <div id="textureName" style="color: #ccc; margin-bottom: 10px; font-size: 14px; word-break: break-word;"></div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="document.getElementById('textureFile').click()" class="button" style="flex: 1;">Load Texture</button>
+                            <button onclick="removeTexture()" class="button" style="flex: 1; background: #6c757d;">Remove Texture</button>
                         </div>
-                        <div class="animation-controls">
-                            <button onclick="animateToCamera()" class="anim-btn" style="width: 100%;">Move to Camera</button>
+                        <input type="file" id="textureFile" accept="image/*" onchange="loadTexture(event)" style="display: none;">
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 8px;">Normal Map</label>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="document.getElementById('normalMapFile').click()" class="button" style="flex: 1;">Load Normal Map</button>
+                        <button onclick="removeNormalMap()" class="button" style="flex: 1; background: #6c757d;">Remove Normal</button>
+                    </div>
+                    <input type="file" id="normalMapFile" accept="image/*" onchange="loadNormalMap(event)" style="display: none;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 8px;">Texture Scale</label>
+                    <input type="range" id="textureScale" min="0.1" max="5" step="0.1" value="1" 
+                           oninput="updateTextureScale(event)" 
+                           style="width: 100%; margin-bottom: 5px;">
+                    <div style="display: flex; justify-content: space-between; color: #888; font-size: 12px;">
+                        <span>Small</span>
+                        <span id="textureScaleValue">1.0</span>
+                        <span>Large</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- New Heightmap/Terrain Section -->
+            <div class="inspector-section" id="heightmapSection" style="display: none; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #4fc3f7;">Terrain/Heightmap</h3>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 8px;">Height Scale</label>
+                    <input type="range" id="heightScale" min="0.1" max="10" step="0.1" value="1.0" 
+                           oninput="updateHeightScale(event)" 
+                           style="width: 100%; margin-bottom: 5px;">
+                    <div style="display: flex; justify-content: space-between; color: #888; font-size: 12px;">
+                        <span>Flat</span>
+                        <span id="heightScaleValue">1.0</span>
+                        <span>Mountainous</span>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="color: #ccc; font-size: 14px; display: block; margin-bottom: 8px;">Load Heightmap Image</label>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <button onclick="document.getElementById('heightmapFile').click()" class="button">Browse Heightmap</button>
+                        <input type="file" id="heightmapFile" accept="image/*" onchange="loadHeightmap(event)" style="display: none;">
+                        <div style="color: #888; font-size: 12px; line-height: 1.4;">
+                            Use grayscale images (white = high, black = low)<br>
+                            Best results with 512x512 or 1024x1024 images
                         </div>
-                        <div class="animation-controls">
-                            <label>Duration (seconds):</label>
-                            <input type="number" id="animDuration" value="2" step="0.1" min="0.1" style="width: 80px;">
-                        </div>
-                        <div class="animation-controls">
-                            <button onclick="stopAnimation()" class="anim-btn" style="background:#ffc107;">Stop Animation</button>
-                        </div>
+                    </div>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button onclick="generateRandomHeightmap()" class="button" style="width: 100%; padding: 12px; background: #28a745;">
+                        Generate Random Terrain
+                    </button>
+                    <button onclick="resetHeightmap()" class="button" style="width: 100%; padding: 10px; background: #6c757d;">
+                        Reset to Flat
+                    </button>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                    <div style="color: #4fc3f7; font-size: 12px; margin-bottom: 5px;">Terrain Info:</div>
+                    <div id="terrainInfo" style="color: #888; font-size: 11px; line-height: 1.4;">
+                        Select a plane object to enable terrain tools
+                    </div>
+                </div>
+            </div>
+
+            <!-- Animation Section -->
+            <div class="inspector-section" id="animationSection" style="display:none; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #4fc3f7;">Animation (Preview Mode Only)</h3>
+                
+                <div class="animation-controls">
+                    <label style="width: 100%; margin-bottom: 8px; color: #ccc;">Move to Position:</label>
+                    <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+                        <input type="number" id="animPosX" step="0.1" placeholder="X" style="flex: 1; padding: 8px;">
+                        <input type="number" id="animPosY" step="0.1" placeholder="Y" style="flex: 1; padding: 8px;">
+                        <input type="number" id="animPosZ" step="0.1" placeholder="Z" style="flex: 1; padding: 8px;">
+                    </div>
+                    <button onclick="animateToPosition()" class="anim-btn" style="width: 100%; padding: 10px;">Move to Position</button>
+                </div>
+                
+                <div class="animation-controls" style="margin: 15px 0;">
+                    <button onclick="animateToCamera()" class="anim-btn" style="width: 100%; padding: 10px; background: #17a2b8;">Move to Camera Position</button>
+                </div>
+                
+                <div class="animation-controls">
+                    <label style="width: 100%; margin-bottom: 8px; color: #ccc;">Animation Settings:</label>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+                        <span style="color: #ccc; font-size: 14px;">Duration:</span>
+                        <input type="number" id="animDuration" value="2" step="0.1" min="0.1" style="width: 80px; padding: 8px;">
+                        <span style="color: #ccc; font-size: 14px;">seconds</span>
+                    </div>
+                </div>
+                
+                <div class="animation-controls">
+                    <button onclick="stopAnimation()" class="anim-btn" style="width: 100%; padding: 10px; background: #ffc107;">Stop All Animations</button>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+                    <div style="color: #888; font-size: 12px; line-height: 1.4;">
+                        <strong>Note:</strong> Animations only work in Preview Mode
                     </div>
                 </div>
             </div>
         </div>
+    </div>
+</div>
     </div>
 
     

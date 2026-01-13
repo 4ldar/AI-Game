@@ -124,7 +124,7 @@ function animate() {
         
         velocity.x -= velocity.x * 10.0 * delta;
         velocity.z -= velocity.z * 10.0 * delta;
-        velocity.y -= 9.8 * 100.0 * delta; // gravity
+        velocity.y -= 6.8 * 100.0 * delta/2.5; // gravity
         
         // Movement relative to camera direction
         const forward = new THREE.Vector3();
@@ -205,7 +205,7 @@ function onKeyDown(event) {
             moveLeft = true;
             break;
         case 'Space':
-            if (canJump) velocity.y += 350;
+            if (canJump) velocity.y += 90;
             canJump = false;
             break;
     }
